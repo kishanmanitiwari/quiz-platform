@@ -26,7 +26,7 @@ export const createRoomSchema = z.object({
   quizId: z.string().min(1)
 });
 
-const joinRoomSchema = z.object({
+export const joinRoomSchema = z.object({
   roomCode: z.string(),
   name: z.string(),
   sessionId: z.string(),
