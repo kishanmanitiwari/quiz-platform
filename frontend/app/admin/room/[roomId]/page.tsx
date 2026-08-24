@@ -188,7 +188,7 @@ export default function RoomPage({
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "WAITING":
-        return <span className="rounded bg-slate-200 px-2 py-1 text-xs font-bold tracking-wide text-slate-800">WAITING</span>;
+        return <span className="rounded bg-slate-200 px-2 py-1 text-xs font-bold tracking-wide text-slate-800">WAITING FOR PLAYERS</span>;
       case "QUESTION_ACTIVE":
         return <span className="animate-pulse rounded bg-emerald-500 px-2 py-1 text-xs font-bold tracking-wide text-white">LIVE</span>;
       case "ACTIVE":
@@ -223,14 +223,17 @@ export default function RoomPage({
     (roomState !== "QUESTION_ACTIVE" || timerExpired),
   );
 
+  const winner = data.leaderboard[0];
+  const runnersUp = data.leaderboard.slice(1);
+
   return (
-    <main className="min-h-screen px-4 py-8">
-      <section className="mx-auto max-w-6xl">
+    <main className="min-h-screen bg-slate-50 px-4 py-8">
+      <section className="mx-auto max-w-7xl">
         <Link
           href={`/admin/quiz/${data.room.quiz.id}`}
           className="text-sm font-semibold text-leaf hover:underline"
         >
-          Back to quiz
+          &larr; Back to quiz
         </Link>
         <div className="mt-3 flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
@@ -238,24 +241,28 @@ export default function RoomPage({
               <h1 className="text-3xl font-bold">Room {data.room.roomCode}</h1>
               {getStatusBadge(roomState)}
             </div>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="mt-1 text-sm text-slate-600 font-medium">
               {data.room.quiz.title}
             </p>
-            <p className="mt-2 break-all text-sm text-slate-700">{joinUrl}</p>
+            {roomState === "WAITING" && (
+              <p className="mt-2 break-all text-sm text-slate-500 bg-slate-200 inline-block px-3 py-1 rounded-md">
+                {joinUrl}
+              </p>
+            )}
           </div>
           
           {/* Controls hide entirely if the room is finished */}
           {roomState !== "FINISHED" && (
             <div className="flex flex-wrap gap-3">
               <button
-                className="focus-ring inline-flex items-center gap-2 rounded-md bg-leaf px-5 py-3 font-semibold text-white transition-opacity hover:opacity-90 shadow-sm"
+                className="focus-ring inline-flex items-center gap-2 rounded-md bg-leaf px-5 py-3 font-bold text-white transition-opacity hover:opacity-90 shadow-sm"
                 onClick={() => emit("quiz:start")}
               >
                 <Play size={18} /> 1. Start Room
               </button>
 
               <button
-                className="focus-ring inline-flex items-center gap-2 rounded-md bg-saffron px-5 py-3 font-semibold text-ink transition-opacity hover:opacity-90 shadow-sm"
+                className="focus-ring inline-flex items-center gap-2 rounded-md bg-saffron px-5 py-3 font-bold text-ink transition-opacity hover:opacity-90 shadow-sm"
                 onClick={() => emit("question:start")}
               >
                 <Play size={18} /> {currentQuestionNumber > 0 ? "2. Next Question" : "2. Start First Question"}
@@ -270,7 +277,7 @@ export default function RoomPage({
               </button>
 
               <button
-                className="focus-ring rounded-md bg-slate-900 px-5 py-3 font-semibold text-white transition-opacity hover:opacity-90 shadow-sm"
+                className="focus-ring rounded-md bg-slate-900 px-5 py-3 font-bold text-white transition-opacity hover:opacity-90 shadow-sm"
                 onClick={finish}
               >
                 🏁 Finish Quiz
@@ -279,183 +286,240 @@ export default function RoomPage({
           )}
         </div>
 
-        {message && <p className="mt-4 text-sm font-semibold text-slate-700">{message}</p>}
-
-        {roomState === "QUESTION_ACTIVE" && (
-          <div className="mt-6 flex items-center gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-sm">
-            <Loader2 className="animate-spin text-emerald-600" size={20} />
-            <p className="text-sm font-semibold text-emerald-800">
-              Question is LIVE!
-              {secondsLeft > 0 && <span className="ml-2 font-mono">({secondsLeft}s remaining)</span>}
-            </p>
-          </div>
-        )}
+        {message && <p className="mt-4 text-sm font-semibold text-red-600">{message}</p>}
 
         {/* ========================================= */}
         {/* GRAND FINALE VIEW (Only shown if FINISHED)  */}
         {/* ========================================= */}
         {roomState === "FINISHED" ? (
-          <div className="mt-12 rounded-xl border border-amber-200 bg-gradient-to-b from-amber-50 to-white p-8 text-center shadow-md">
-            <Trophy className="mx-auto h-16 w-16 text-amber-500 mb-4" />
-            <h2 className="text-4xl font-black text-slate-900">Final Leaderboard</h2>
-            <p className="mt-2 text-lg text-slate-600">The quiz has officially concluded.</p>
+          <div className="mt-12 text-center">
+            
+            {/* 🏆 GRAND WINNER SECTION */}
+            {winner ? (
+              <div className="relative mx-auto mb-12 max-w-4xl overflow-hidden rounded-[2rem] bg-gradient-to-br from-amber-400 via-yellow-400 to-orange-500 p-16 shadow-[0_10px_50px_rgba(251,191,36,0.4)] border-4 border-yellow-200">
+                {/* CSS Balloons and Confetti */}
+                <div className="absolute left-8 top-8 animate-bounce text-7xl opacity-90 drop-shadow-md">🎈</div>
+                <div className="absolute right-12 top-16 animate-pulse text-7xl opacity-90 drop-shadow-md">🎉</div>
+                <div className="absolute bottom-12 left-16 animate-bounce text-6xl opacity-90 drop-shadow-md" style={{ animationDelay: '0.2s' }}>🎊</div>
+                <div className="absolute bottom-8 right-16 animate-bounce text-7xl opacity-90 drop-shadow-md" style={{ animationDelay: '0.5s' }}>🎈</div>
 
-            <div className="mt-10 mx-auto max-w-2xl grid gap-4 text-left">
-              {data.leaderboard.length === 0 ? (
-                <p className="text-center text-slate-500">No participants scored any points.</p>
-              ) : (
-                data.leaderboard.map((row, index) => {
-                  let badgeClass = "bg-white border-slate-200 text-slate-700";
-                  let rankIcon = <span className="font-black text-slate-400">#{row.rank}</span>;
+                <Trophy className="mx-auto mb-6 h-32 w-32 text-white drop-shadow-xl" />
+                <h2 className="text-2xl font-black uppercase tracking-widest text-yellow-900/60">Grand Winner</h2>
+                <h3 className="mt-2 text-7xl font-black text-white drop-shadow-lg">{winner.name}</h3>
+                <p className="mt-8 inline-block rounded-full bg-white/25 px-10 py-4 text-4xl font-black tracking-tight text-white backdrop-blur-sm shadow-inner">
+                  {winner.totalScore} <span className="text-2xl font-bold uppercase tracking-wider opacity-80">Points</span>
+                </p>
+              </div>
+            ) : (
+              <p className="text-center text-slate-500">No participants scored any points.</p>
+            )}
 
-                  if (index === 0) {
-                    badgeClass = "bg-yellow-100 border-yellow-400 transform scale-105 shadow-md z-10 text-yellow-900";
-                    rankIcon = <Medal className="h-7 w-7 text-yellow-600" />;
-                  } else if (index === 1) {
-                    badgeClass = "bg-slate-100 border-slate-300 text-slate-800";
-                    rankIcon = <Medal className="h-6 w-6 text-slate-500" />;
-                  } else if (index === 2) {
-                    badgeClass = "bg-orange-100 border-orange-300 text-orange-900";
-                    rankIcon = <Medal className="h-6 w-6 text-orange-600" />;
-                  }
+            {/* 🥈 RUNNERS UP SECTION */}
+            {runnersUp.length > 0 && (
+              <div className="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+                <h3 className="mb-6 text-left text-2xl font-bold text-slate-800">Runner Ups</h3>
+                <div className="grid gap-4 text-left">
+                  {runnersUp.map((row, index) => {
+                    let badgeClass = "bg-white border-slate-200 text-slate-700";
+                    let rankIcon = <span className="font-black text-slate-400">#{row.rank}</span>;
 
-                  return (
-                    <div
-                      key={`${row.rank}-${row.name}`}
-                      className={`flex items-center justify-between rounded-xl px-6 py-4 border-2 transition-all ${badgeClass}`}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center">
-                          {rankIcon}
+                    if (index === 0) { // Originally Rank 2
+                      badgeClass = "bg-slate-100 border-slate-300 text-slate-800";
+                      rankIcon = <Medal className="h-6 w-6 text-slate-500" />;
+                    } else if (index === 1) { // Originally Rank 3
+                      badgeClass = "bg-orange-100 border-orange-300 text-orange-900";
+                      rankIcon = <Medal className="h-6 w-6 text-orange-600" />;
+                    }
+
+                    return (
+                      <div
+                        key={`${row.rank}-${row.name}`}
+                        className={`flex items-center justify-between rounded-xl px-6 py-4 border-2 transition-all ${badgeClass}`}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center">
+                            {rankIcon}
+                          </div>
+                          <span className="text-xl font-bold">{row.name}</span>
                         </div>
-                        <span className="text-xl font-bold">{row.name}</span>
+                        <div className="text-right">
+                          <span className="block text-2xl font-black tracking-tight">{row.totalScore}</span>
+                          <span className="block text-xs font-semibold uppercase tracking-wider opacity-70">Points</span>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <span className="block text-2xl font-black tracking-tight">{row.totalScore}</span>
-                        <span className="block text-xs font-semibold uppercase tracking-wider opacity-70">Points</span>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           /* ========================================= */
-          /* NORMAL LIVE VIEW (Hidden if FINISHED)     */
+          /* LIVE & WAITING VIEW                       */
           /* ========================================= */
           <>
-            <div className="mt-8 grid gap-6 lg:grid-cols-[360px_1fr]">
-              <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-                {qr && (
-                  <img
-                    src={qr}
-                    alt={`QR code for ${joinUrl}`}
-                    className="mx-auto h-auto w-full max-w-[320px]"
-                  />
-                )}
-                <button
-                  className="focus-ring mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-white px-4 py-3 font-semibold text-ink ring-1 ring-slate-300 hover:bg-slate-50 transition-colors"
-                  onClick={() => qr && window.open(qr, "_blank")}
-                >
-                  <Maximize2 size={18} /> QR fullscreen
-                </button>
-              </div>
-              <div className="grid gap-6 md:grid-cols-2">
-                <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-                  <h2 className="text-lg font-bold">
+            {roomState === "WAITING" ? (
+              // WAITING FOR PLAYERS (Shows QR Code)
+              <div className="mt-8 grid gap-6 lg:grid-cols-[360px_1fr]">
+                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h2 className="text-center font-bold text-slate-800 text-lg mb-4">Join the Game!</h2>
+                  {qr && (
+                    <img
+                      src={qr}
+                      alt={`QR code for ${joinUrl}`}
+                      className="mx-auto h-auto w-full max-w-[320px] rounded-lg border-4 border-slate-100"
+                    />
+                  )}
+                  <button
+                    className="focus-ring mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-white px-4 py-3 font-semibold text-ink ring-1 ring-slate-300 hover:bg-slate-50 transition-colors"
+                    onClick={() => qr && window.open(qr, "_blank")}
+                  >
+                    <Maximize2 size={18} /> Fullscreen QR
+                  </button>
+                </div>
+                
+                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h2 className="text-xl font-bold mb-6 border-b pb-4">
                     Participants ({participants.length})
                   </h2>
-                  <div className="mt-4 grid gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {participants.map((p) => (
                       <p
                         key={p.id}
-                        className="rounded-md bg-slate-50 px-3 py-2 text-sm border border-slate-100"
+                        className="rounded-full bg-slate-100 px-4 py-2 font-semibold text-slate-700 border border-slate-200"
                       >
                         {p.name}
                       </p>
                     ))}
-                  </div>
-                </div>
-                <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
-                  <h2 className="text-lg font-bold">Live Leaderboard</h2>
-                  <div className="mt-4 grid gap-2">
-                    {data.leaderboard.map((row) => (
-                      <p
-                        key={`${row.rank}-${row.name}`}
-                        className="flex justify-between rounded-md bg-slate-50 px-3 py-2 text-sm border border-slate-100"
-                      >
-                        <span>
-                          <span className="font-semibold text-slate-500 mr-2">{row.rank}.</span> 
-                          {row.name}
-                        </span>
-                        <span className="font-semibold text-leaf">{row.totalScore}</span>
-                      </p>
-                    ))}
+                    {participants.length === 0 && (
+                      <p className="text-slate-500 italic mt-4 w-full text-center">Waiting for players to scan and join...</p>
+                    )}
                   </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              // QUIZ HAS STARTED (QR is Hidden. Question Takes Center Stage)
+              <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_380px]">
+                
+                {/* LEFT: CENTER STAGE QUESTION */}
+                <div className="flex flex-col gap-6">
+                  {roomState === "QUESTION_ACTIVE" && (
+                    <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-5 py-4 shadow-sm">
+                      <Loader2 className="animate-spin text-emerald-600" size={24} />
+                      <p className="text-lg font-bold text-emerald-800 tracking-wide">
+                        Question is LIVE! Answers are locking in...
+                      </p>
+                    </div>
+                  )}
 
-            {(state?.currentQuestion || currentQuestion) && (
-              <div className="mt-6 rounded-md border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-leaf uppercase tracking-wider">
-                      Current question {state?.currentQuestion?.order ?? currentQuestion?.order}
-                    </p>
-                    <p className="mt-2 text-xl font-bold text-slate-900">
-                      {state?.currentQuestion?.text ?? currentQuestion?.text}
-                    </p>
-                  </div>
+                  {(state?.currentQuestion || currentQuestion) ? (
+                    <div className="rounded-xl border-2 border-slate-200 bg-white p-8 shadow-md">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-8">
+                        <div>
+                          <p className="text-sm font-bold text-leaf uppercase tracking-widest bg-emerald-50 inline-block px-3 py-1 rounded-full">
+                            Question {state?.currentQuestion?.order ?? currentQuestion?.order} of {data.room.quiz.questions.length}
+                          </p>
+                          <p className="mt-4 text-3xl font-black text-slate-900 leading-tight">
+                            {state?.currentQuestion?.text ?? currentQuestion?.text}
+                          </p>
+                        </div>
 
-                  {secondsLeft > 0 && (
-                    <div
-                      className={`flex shrink-0 flex-col items-center justify-center rounded-xl px-6 py-3 transition-all duration-300 ${
-                        secondsLeft <= 5
-                          ? "bg-red-600 text-white animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.5)] scale-105"
-                          : "bg-slate-900 text-white"
-                      }`}
-                    >
-                      <span className="text-xs font-bold uppercase tracking-widest opacity-80">
-                        Time Left
-                      </span>
-                      <span className="mt-1 font-mono text-4xl font-black tabular-nums leading-none">
-                        {secondsLeft}s
-                      </span>
+                        {secondsLeft > 0 && (
+                          <div
+                            className={`flex shrink-0 flex-col items-center justify-center rounded-2xl px-6 py-4 transition-all duration-300 ${
+                              secondsLeft <= 5
+                                ? "bg-red-600 text-white animate-pulse shadow-[0_0_20px_rgba(220,38,38,0.6)] scale-105"
+                                : "bg-slate-900 text-white"
+                            }`}
+                          >
+                            <span className="text-xs font-bold uppercase tracking-widest opacity-80">
+                              Time Left
+                            </span>
+                            <span className="mt-1 font-mono text-5xl font-black tabular-nums leading-none">
+                              {secondsLeft}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {currentQuestion && (
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mt-4">
+                          {(["A", "B", "C", "D"] as const).map((letter) => {
+                            const isCorrect = showCorrectAnswer && currentQuestion.correctOption === letter;
+                            
+                            return (
+                              <div
+                                key={letter}
+                                className={`flex items-center rounded-xl border-2 p-5 transition-colors ${
+                                  isCorrect
+                                    ? "border-emerald-500 bg-emerald-100 shadow-sm"
+                                    : "border-slate-200 bg-slate-50"
+                                }`}
+                              >
+                                <span 
+                                  className={`mr-4 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-black text-lg shadow-sm transition-colors ${
+                                    isCorrect ? "bg-emerald-600 text-white" : "bg-white text-slate-500 border border-slate-200"
+                                  }`}
+                                >
+                                  {letter}
+                                </span>
+                                <span className={`text-lg font-bold ${isCorrect ? "text-emerald-950" : "text-slate-700"}`}>
+                                  {currentQuestion[`option${letter}`]}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex h-64 items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50">
+                      <p className="text-xl font-semibold text-slate-500">Waiting for next question...</p>
                     </div>
                   )}
                 </div>
 
-                {currentQuestion && (
-                  <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {(["A", "B", "C", "D"] as const).map((letter) => {
-                      const isCorrect = showCorrectAnswer && currentQuestion.correctOption === letter;
-                      
-                      return (
-                        <div
-                          key={letter}
-                          className={`flex items-center rounded-lg border p-4 transition-colors ${
-                            isCorrect
-                              ? "border-emerald-500 bg-emerald-50"
-                              : "border-slate-200 bg-slate-50"
-                          }`}
-                        >
-                          <span 
-                            className={`mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-md font-bold shadow-sm transition-colors ${
-                              isCorrect ? "bg-emerald-500 text-white" : "bg-white text-slate-500"
-                            }`}
-                          >
-                            {letter}
-                          </span>
-                          <span className={`font-semibold ${isCorrect ? "text-emerald-950" : "text-slate-700"}`}>
-                            {currentQuestion[`option${letter}`]}
-                          </span>
-                        </div>
-                      );
-                    })}
+                {/* RIGHT: LIVE LEADERBOARD */}
+                <div className="flex flex-col gap-6">
+                  <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden flex flex-col max-h-[800px]">
+                    <div className="bg-slate-900 px-6 py-4">
+                      <h2 className="text-lg font-bold text-white flex justify-between items-center">
+                        Live Leaderboard <Trophy size={18} className="text-yellow-400" />
+                      </h2>
+                    </div>
+                    
+                    <div className="p-4 overflow-y-auto custom-scrollbar">
+                      <div className="grid gap-2">
+                        {data.leaderboard.length === 0 ? (
+                          <p className="text-center text-slate-500 py-4 italic">No scores yet</p>
+                        ) : (
+                          data.leaderboard.map((row) => (
+                            <div
+                              key={`${row.rank}-${row.name}`}
+                              className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3 border border-slate-100 hover:border-slate-300 transition-colors"
+                            >
+                              <div className="flex items-center gap-3 truncate pr-4">
+                                <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-black ${
+                                  row.rank === 1 ? "bg-yellow-400 text-yellow-900" :
+                                  row.rank === 2 ? "bg-slate-300 text-slate-800" :
+                                  row.rank === 3 ? "bg-orange-300 text-orange-900" :
+                                  "bg-slate-200 text-slate-600"
+                                }`}>
+                                  {row.rank}
+                                </span>
+                                <span className="font-bold text-slate-800 truncate">{row.name}</span>
+                              </div>
+                              <span className="font-black text-leaf tabular-nums bg-emerald-100 px-2 py-1 rounded">
+                                {row.totalScore}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
                   </div>
-                )}
+                </div>
+                
               </div>
             )}
           </>
