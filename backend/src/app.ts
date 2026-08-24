@@ -5,8 +5,9 @@ import express, {
   type RequestHandler,
   type Response,
 } from "express";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
+// CHANGED: Use namespace/named imports to satisfy strict TypeScript building
+import * as helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
 import morgan from "morgan";
 import { nanoid } from "nanoid";
 import { env } from "./env.js";
@@ -44,7 +45,7 @@ function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] : (value ?? "");
 }
 
-app.use(helmet());
+app.use((helmet as any)());
 app.use(cors());
 app.use(express.json({ limit: "100kb" }));
 app.use(morgan("tiny"));
