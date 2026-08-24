@@ -1,5 +1,5 @@
 import cors from "cors";
-import express from "express";
+import express, { type NextFunction, type Request, type RequestHandler, type Response } from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import morgan from "morgan";
@@ -18,6 +18,12 @@ import {
 } from "./validation.js";
 
 export const app = express();
+
+function asyncHandler(handler: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler {
+  return (req, res, next) => {
+    void handler(req, res, next).catch(next);
+  };
+}
 
 function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] : value ?? "";
@@ -41,22 +47,22 @@ app.post("/api/admin/login", (req, res) => {
   res.json({ token: createAdminToken() });
 });
 
-app.get("/api/admin/quizzes", requireAdmin, async (_req, res) => {
+app.get("/api/admin/quizzes", requireAdmin, asyncHandler(async (_req, res) => {
   const quizzes = await prisma.quiz.findMany({
     include: { questions: { orderBy: { order: "asc" } }, rooms: { orderBy: { createdAt: "desc" } } },
     orderBy: { createdAt: "desc" }
   });
   res.json({ quizzes });
-});
+}));
 
-app.post("/api/admin/quizzes", requireAdmin, async (req, res) => {
+app.post("/api/admin/quizzes", requireAdmin, asyncHandler(async (req, res) => {
   const parsed = createQuizSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const quiz = await prisma.quiz.create({ data: { title: parsed.data.title } });
   res.status(201).json({ quiz });
-});
+}));
 
-app.get("/api/admin/quizzes/:quizId", requireAdmin, async (req, res) => {
+app.get("/api/admin/quizzes/:quizId", requireAdmin, asyncHandler(async (req, res) => {
   const quizId = routeParam(req.params.quizId);
   const quiz = await prisma.quiz.findUnique({
     where: { id: quizId },
@@ -64,9 +70,9 @@ app.get("/api/admin/quizzes/:quizId", requireAdmin, async (req, res) => {
   });
   if (!quiz) return res.status(404).json({ error: "Quiz not found" });
   res.json({ quiz });
-});
+}));
 
-app.put("/api/admin/quizzes/:quizId/questions/:order", requireAdmin, async (req, res) => {
+app.put("/api/admin/quizzes/:quizId/questions/:order", requireAdmin, asyncHandler(async (req, res) => {
   const quizId = routeParam(req.params.quizId);
   const parsed = upsertQuestionSchema.safeParse({ ...req.body, order: Number(req.params.order) });
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -79,9 +85,9 @@ app.put("/api/admin/quizzes/:quizId/questions/:order", requireAdmin, async (req,
     update: parsed.data
   });
   res.json({ question });
-});
+}));
 
-app.post("/api/admin/rooms", requireAdmin, async (req, res) => {
+app.post("/api/admin/rooms", requireAdmin, asyncHandler(async (req, res) => {
   const parsed = createRoomSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const questionCount = await prisma.question.count({ where: { quizId: parsed.data.quizId } });
@@ -91,9 +97,9 @@ app.post("/api/admin/rooms", requireAdmin, async (req, res) => {
     data: { quizId: parsed.data.quizId, roomCode: nanoid(6).toUpperCase() }
   });
   res.status(201).json({ room });
-});
+}));
 
-app.get("/api/admin/rooms/:roomId", requireAdmin, async (req, res) => {
+app.get("/api/admin/rooms/:roomId", requireAdmin, asyncHandler(async (req, res) => {
   const roomId = routeParam(req.params.roomId);
   const room = await prisma.room.findUnique({
     where: { id: roomId },
@@ -106,9 +112,9 @@ app.get("/api/admin/rooms/:roomId", requireAdmin, async (req, res) => {
   if (!room) return res.status(404).json({ error: "Room not found" });
   const leaderboard = await getLeaderboard(prisma, room.id);
   res.json({ room, leaderboard });
-});
+}));
 
-app.post("/api/join", async (req, res) => {
+app.post("/api/join", asyncHandler(async (req, res) => {
   const parsed = joinRoomSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Invalid join request" });
   const room = await prisma.room.findUnique({ where: { roomCode: parsed.data.roomCode.toUpperCase() } });
@@ -124,17 +130,17 @@ app.post("/api/join", async (req, res) => {
   });
   const state = await getPublicRoomState(prisma, room.id, participant.id);
   res.status(201).json({ participant, state });
-});
+}));
 
-app.get("/api/rooms/code/:roomCode", async (req, res) => {
+app.get("/api/rooms/code/:roomCode", asyncHandler(async (req, res) => {
   const roomCode = routeParam(req.params.roomCode).toUpperCase();
   const room = await prisma.room.findUnique({ where: { roomCode } });
   if (!room) return res.status(404).json({ error: "Invalid room code" });
   const state = await getPublicRoomState(prisma, room.id);
   res.json({ state });
-});
+}));
 
-app.get("/api/participants/:participantId/result", async (req, res) => {
+app.get("/api/participants/:participantId/result", asyncHandler(async (req, res) => {
   const participantId = routeParam(req.params.participantId);
   const result = await prisma.result.findUnique({
     where: { participantId },
@@ -142,11 +148,16 @@ app.get("/api/participants/:participantId/result", async (req, res) => {
   });
   if (!result) return res.status(404).json({ error: "Result not found" });
   res.json({ result });
-});
+}));
 
-app.post("/api/admin/rooms/:roomId/finish", requireAdmin, async (req, res) => {
+app.post("/api/admin/rooms/:roomId/finish", requireAdmin, asyncHandler(async (req, res) => {
   const roomId = routeParam(req.params.roomId);
   const room = await prisma.room.update({ where: { id: roomId }, data: { status: "FINISHED" } });
   const leaderboard = await persistResults(prisma, room.id);
   res.json({ room, leaderboard });
+}));
+
+app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  console.error(error);
+  res.status(500).json({ error: "Internal server error" });
 });

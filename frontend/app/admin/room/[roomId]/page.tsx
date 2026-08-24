@@ -15,14 +15,26 @@ type RoomPayload = {
     status: string;
     currentQuestion: number;
     questionEndsAt: string | null;
-    quiz: { id: string; title: string; questions: unknown[] };
+    quiz: {
+      id: string;
+      title: string;
+      questions: {
+        order: number;
+        text: string;
+        optionA: string;
+        optionB: string;
+        optionC: string;
+        optionD: string;
+        correctOption: "A" | "B" | "C" | "D";
+      }[];
+    };
     participants: { id: string; name: string }[];
   };
   leaderboard: { rank: number; name: string; totalScore: number; correctAnswers: number; totalTime: number }[];
 };
 
 type PublicState = {
-  room: { id: string; roomCode: string; status: string; currentQuestion: number; participantCount: number };
+  room: { id: string; roomCode: string; status: string; currentQuestion: number; questionEndsAt: string | null; participantCount: number };
   participants: { id: string; name: string }[];
   currentQuestion: { order: number; text: string } | null;
 };
@@ -34,6 +46,7 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   const [socket, setSocket] = useState<Socket | null>(null);
   const [qr, setQr] = useState("");
   const [message, setMessage] = useState("");
+  const [secondsLeft, setSecondsLeft] = useState(0);
 
   const joinUrl = useMemo(() => {
     if (!data) return "";
@@ -66,8 +79,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     client.on("room:state", setState);
     client.on("question:start", setState);
     client.on("leaderboard:update", (leaderboard) => setData((current) => current ? { ...current, leaderboard } : current));
-    client.on("question:end", ({ leaderboard }) => setData((current) => current ? { ...current, leaderboard } : current));
-    client.on("quiz:finish", ({ leaderboard }) => {
+    client.on("question:end", ({ room, leaderboard }) => {
+      setState((current) => current ? { ...current, room: { ...current.room, status: room.status, currentQuestion: room.currentQuestion, questionEndsAt: room.questionEndsAt } } : current);
+      setData((current) => current ? { ...current, leaderboard } : current);
+    });
+    client.on("quiz:finish", ({ room, leaderboard }) => {
+      setState((current) => current ? { ...current, room: { ...current.room, status: room.status, currentQuestion: room.currentQuestion, questionEndsAt: room.questionEndsAt } } : current);
       setData((current) => current ? { ...current, leaderboard } : current);
       void load();
     });
@@ -76,6 +93,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
       client.close();
     };
   }, [roomId]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const questionEndsAt = state?.room.questionEndsAt ?? data?.room.questionEndsAt;
+      if (!questionEndsAt) return setSecondsLeft(0);
+      setSecondsLeft(Math.max(0, Math.ceil((new Date(questionEndsAt).getTime() - Date.now()) / 1000)));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [data?.room.questionEndsAt, state?.room.questionEndsAt]);
 
   function emit(name: string) {
     socket?.emit(name, { roomId }, (ack: { ok: boolean; error?: string }) => {
@@ -96,6 +122,15 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
   if (!data) return <main className="p-6">Loading...</main>;
   const roomState = state?.room.status ?? data.room.status;
   const participants = state?.participants ?? data.room.participants;
+  const currentQuestionNumber = state?.room.currentQuestion ?? data.room.currentQuestion;
+  const currentQuestion = data.room.quiz.questions.find((question) => question.order === currentQuestionNumber);
+  const questionEndsAt = state?.room.questionEndsAt ?? data.room.questionEndsAt;
+  const timerExpired = questionEndsAt ? Date.now() >= new Date(questionEndsAt).getTime() : false;
+  const correctAnswer =
+    currentQuestion && currentQuestion.correctOption
+      ? `${currentQuestion.correctOption}. ${currentQuestion[`option${currentQuestion.correctOption}`]}`
+      : null;
+  const showCorrectAnswer = Boolean(currentQuestion && currentQuestionNumber > 0 && (roomState !== "QUESTION_ACTIVE" || timerExpired));
 
   return (
     <main className="min-h-screen px-4 py-8">
@@ -152,6 +187,12 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
           <div className="mt-6 rounded-md border border-slate-200 bg-white p-4">
             <p className="text-sm font-semibold text-leaf">Current question {state.currentQuestion.order}</p>
             <p className="mt-2 text-lg font-bold">{state.currentQuestion.text}</p>
+          </div>
+        )}
+        {showCorrectAnswer && correctAnswer && (
+          <div className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-sm font-semibold text-emerald-800">Correct answer</p>
+            <p className="mt-2 text-lg font-bold text-emerald-950">{correctAnswer}</p>
           </div>
         )}
       </section>

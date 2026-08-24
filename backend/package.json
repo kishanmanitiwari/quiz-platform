@@ -12,7 +12,8 @@
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
-    "load:test": "tsx scripts/load-test.ts"
+    "load:test": "tsx scripts/load-test.ts",
+    "smoke:live": "tsx scripts/mock-live-room.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
