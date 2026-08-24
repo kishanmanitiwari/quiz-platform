@@ -4,7 +4,7 @@ import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import { io, type Socket } from "socket.io-client";
-import { Maximize2, Play, Square } from "lucide-react";
+import { Maximize2, Play, Square, Loader2 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { SOCKET_URL } from "@/lib/config";
 
@@ -158,12 +158,14 @@ export default function RoomPage({
 
   function emit(name: string) {
     socket?.emit(name, { roomId }, (ack: { ok: boolean; error?: string }) => {
-      setMessage(ack.ok ? "Done" : (ack.error ?? "Action failed"));
+      setMessage(ack.ok ? "" : (ack.error ?? "Action failed"));
       void load();
     });
   }
 
   async function finish() {
+    if (!window.confirm("Are you sure you want to end the entire quiz session? This action cannot be undone.")) return;
+    
     socket?.emit(
       "quiz:finish",
       { roomId },
@@ -172,7 +174,7 @@ export default function RoomPage({
         error?: string;
         leaderboard?: RoomPayload["leaderboard"];
       }) => {
-        setMessage(ack.ok ? "Room finished" : (ack.error ?? "Finish failed"));
+        setMessage(ack.ok ? "" : (ack.error ?? "Finish failed"));
         const leaderboard = ack.leaderboard;
         if (leaderboard)
           setData((current) =>
@@ -183,22 +185,39 @@ export default function RoomPage({
     );
   }
 
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "WAITING":
+        return <span className="rounded bg-slate-200 px-2 py-1 text-xs font-bold tracking-wide text-slate-800">WAITING</span>;
+      case "QUESTION_ACTIVE":
+        return <span className="animate-pulse rounded bg-emerald-500 px-2 py-1 text-xs font-bold tracking-wide text-white">LIVE</span>;
+      case "ACTIVE":
+      case "QUESTION_ENDED":
+      case "WAITING_FOR_NEXT":
+        return <span className="rounded bg-amber-400 px-2 py-1 text-xs font-bold tracking-wide text-amber-950">ACTIVE</span>;
+      case "FINISHED":
+        return <span className="rounded bg-slate-800 px-2 py-1 text-xs font-bold tracking-wide text-white">FINISHED</span>;
+      default:
+        return <span className="rounded bg-slate-200 px-2 py-1 text-xs font-bold tracking-wide text-slate-800">{status}</span>;
+    }
+  };
+
   if (!data) return <main className="p-6">Loading...</main>;
+  
   const roomState = state?.room.status ?? data.room.status;
   const participants = state?.participants ?? data.room.participants;
-  const currentQuestionNumber =
-    state?.room.currentQuestion ?? data.room.currentQuestion;
+  const currentQuestionNumber = state?.room.currentQuestion ?? data.room.currentQuestion;
+  
+  // Gets full details including options for the active question
   const currentQuestion = data.room.quiz.questions.find(
     (question) => question.order === currentQuestionNumber,
   );
+  
   const questionEndsAt = state?.room.questionEndsAt ?? data.room.questionEndsAt;
   const timerExpired = questionEndsAt
     ? Date.now() >= new Date(questionEndsAt).getTime()
     : false;
-  const correctAnswer =
-    currentQuestion && currentQuestion.correctOption
-      ? `${currentQuestion.correctOption}. ${currentQuestion[`option${currentQuestion.correctOption}`]}`
-      : null;
+      
   const showCorrectAnswer = Boolean(
     currentQuestion &&
     currentQuestionNumber > 0 &&
@@ -210,48 +229,68 @@ export default function RoomPage({
       <section className="mx-auto max-w-6xl">
         <Link
           href={`/admin/quiz/${data.room.quiz.id}`}
-          className="text-sm font-semibold text-leaf"
+          className="text-sm font-semibold text-leaf hover:underline"
         >
           Back to quiz
         </Link>
         <div className="mt-3 flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
-            <h1 className="text-3xl font-bold">Room {data.room.roomCode}</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold">Room {data.room.roomCode}</h1>
+              {getStatusBadge(roomState)}
+            </div>
             <p className="mt-1 text-sm text-slate-600">
-              {data.room.quiz.title} - {roomState}
+              {data.room.quiz.title}
             </p>
             <p className="mt-2 break-all text-sm text-slate-700">{joinUrl}</p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          
+          <div className="flex flex-wrap gap-3">
             <button
-              className="focus-ring inline-flex items-center gap-2 rounded-md bg-leaf px-4 py-3 font-semibold text-white"
+              className="focus-ring inline-flex items-center gap-2 rounded-md bg-leaf px-5 py-3 font-semibold text-white transition-opacity hover:opacity-90 shadow-sm"
               onClick={() => emit("quiz:start")}
             >
-              <Play size={18} /> Start quiz
+              <Play size={18} /> 1. Start Room
             </button>
+
             <button
-              className="focus-ring inline-flex items-center gap-2 rounded-md bg-saffron px-4 py-3 font-semibold text-ink"
+              className="focus-ring inline-flex items-center gap-2 rounded-md bg-saffron px-5 py-3 font-semibold text-ink transition-opacity hover:opacity-90 shadow-sm"
               onClick={() => emit("question:start")}
             >
-              <Play size={18} /> Start question
+              <Play size={18} /> {currentQuestionNumber > 0 ? "2. Next Question" : "2. Start First Question"}
             </button>
+
             <button
-              className="focus-ring inline-flex items-center gap-2 rounded-md bg-white px-4 py-3 font-semibold text-ink"
+              className="focus-ring inline-flex items-center gap-2 rounded-md bg-white border border-slate-300 px-5 py-3 font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-red-600 shadow-sm"
               onClick={() => emit("question:end")}
+              title="Use this if everyone finishes before the timer runs out"
             >
-              <Square size={18} /> End question
+              <Square size={18} /> End Early
             </button>
+
             <button
-              className="focus-ring rounded-md bg-ink px-4 py-3 font-semibold text-white"
+              className="focus-ring rounded-md bg-slate-900 px-5 py-3 font-semibold text-white transition-opacity hover:opacity-90 shadow-sm"
               onClick={finish}
             >
-              Finish
+              🏁 Finish Quiz
             </button>
           </div>
         </div>
-        {message && <p className="mt-4 text-sm text-slate-700">{message}</p>}
+
+        {message && <p className="mt-4 text-sm font-semibold text-slate-700">{message}</p>}
+
+        {roomState === "QUESTION_ACTIVE" && (
+          <div className="mt-6 flex items-center gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 shadow-sm">
+            <Loader2 className="animate-spin text-emerald-600" size={20} />
+            <p className="text-sm font-semibold text-emerald-800">
+              Question is LIVE!
+              {secondsLeft > 0 && <span className="ml-2 font-mono">({secondsLeft}s remaining)</span>}
+            </p>
+          </div>
+        )}
+
         <div className="mt-8 grid gap-6 lg:grid-cols-[360px_1fr]">
-          <div className="rounded-md border border-slate-200 bg-white p-4">
+          <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
             {qr && (
               <img
                 src={qr}
@@ -260,14 +299,14 @@ export default function RoomPage({
               />
             )}
             <button
-              className="focus-ring mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-white px-4 py-3 font-semibold text-ink ring-1 ring-slate-300"
+              className="focus-ring mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-white px-4 py-3 font-semibold text-ink ring-1 ring-slate-300 hover:bg-slate-50 transition-colors"
               onClick={() => qr && window.open(qr, "_blank")}
             >
               <Maximize2 size={18} /> QR fullscreen
             </button>
           </div>
           <div className="grid gap-6 md:grid-cols-2">
-            <div className="rounded-md border border-slate-200 bg-white p-4">
+            <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="text-lg font-bold">
                 Participants ({participants.length})
               </h2>
@@ -275,49 +314,94 @@ export default function RoomPage({
                 {participants.map((p) => (
                   <p
                     key={p.id}
-                    className="rounded-md bg-slate-50 px-3 py-2 text-sm"
+                    className="rounded-md bg-slate-50 px-3 py-2 text-sm border border-slate-100"
                   >
                     {p.name}
                   </p>
                 ))}
               </div>
             </div>
-            <div className="rounded-md border border-slate-200 bg-white p-4">
+            <div className="rounded-md border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="text-lg font-bold">Leaderboard</h2>
               <div className="mt-4 grid gap-2">
                 {data.leaderboard.map((row) => (
                   <p
                     key={`${row.rank}-${row.name}`}
-                    className="flex justify-between rounded-md bg-slate-50 px-3 py-2 text-sm"
+                    className="flex justify-between rounded-md bg-slate-50 px-3 py-2 text-sm border border-slate-100"
                   >
                     <span>
-                      {row.rank}. {row.name}
+                      <span className="font-semibold text-slate-500 mr-2">{row.rank}.</span> 
+                      {row.name}
                     </span>
-                    <span className="font-semibold">{row.totalScore}</span>
+                    <span className="font-semibold text-leaf">{row.totalScore}</span>
                   </p>
                 ))}
               </div>
             </div>
           </div>
         </div>
-        {state?.currentQuestion && (
-          <div className="mt-6 rounded-md border border-slate-200 bg-white p-4">
-            <p className="text-sm font-semibold text-leaf">
-              Current question {state.currentQuestion.order}
-            </p>
-            <p className="mt-2 text-lg font-bold">
-              {state.currentQuestion.text}
-            </p>
-          </div>
-        )}
-        {showCorrectAnswer && correctAnswer && (
-          <div className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 p-4">
-            <p className="text-sm font-semibold text-emerald-800">
-              Correct answer
-            </p>
-            <p className="mt-2 text-lg font-bold text-emerald-950">
-              {correctAnswer}
-            </p>
+
+        {/* Current Question and Options Display */}
+        {(state?.currentQuestion || currentQuestion) && (
+          <div className="mt-6 rounded-md border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-leaf uppercase tracking-wider">
+                  Current question {state?.currentQuestion?.order ?? currentQuestion?.order}
+                </p>
+                <p className="mt-2 text-xl font-bold text-slate-900">
+                  {state?.currentQuestion?.text ?? currentQuestion?.text}
+                </p>
+              </div>
+
+              {secondsLeft > 0 && (
+                <div
+                  className={`flex shrink-0 flex-col items-center justify-center rounded-xl px-6 py-3 transition-all duration-300 ${
+                    secondsLeft <= 5
+                      ? "bg-red-600 text-white animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.5)] scale-105"
+                      : "bg-slate-900 text-white"
+                  }`}
+                >
+                  <span className="text-xs font-bold uppercase tracking-widest opacity-80">
+                    Time Left
+                  </span>
+                  <span className="mt-1 font-mono text-4xl font-black tabular-nums leading-none">
+                    {secondsLeft}s
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Render 4 Options like the user sees on their phone */}
+            {currentQuestion && (
+              <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {(["A", "B", "C", "D"] as const).map((letter) => {
+                  const isCorrect = showCorrectAnswer && currentQuestion.correctOption === letter;
+                  
+                  return (
+                    <div
+                      key={letter}
+                      className={`flex items-center rounded-lg border p-4 transition-colors ${
+                        isCorrect
+                          ? "border-emerald-500 bg-emerald-50"
+                          : "border-slate-200 bg-slate-50"
+                      }`}
+                    >
+                      <span 
+                        className={`mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-md font-bold shadow-sm transition-colors ${
+                          isCorrect ? "bg-emerald-500 text-white" : "bg-white text-slate-500"
+                        }`}
+                      >
+                        {letter}
+                      </span>
+                      <span className={`font-semibold ${isCorrect ? "text-emerald-950" : "text-slate-700"}`}>
+                        {currentQuestion[`option${letter}`]}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </section>
