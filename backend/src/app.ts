@@ -44,11 +44,12 @@ function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] : (value ?? "");
 }
 
-app.use(helmet());
+app.use((helmet as any)());
 app.use(cors());
 app.use(express.json({ limit: "100kb" }));
 app.use(morgan("tiny"));
-app.use(rateLimit({ windowMs: 60_000, max: 180 }));
+app.use((rateLimit as any)({ windowMs: 60_000, max: 180 }));
+
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
