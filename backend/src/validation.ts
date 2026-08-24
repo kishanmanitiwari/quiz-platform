@@ -26,10 +26,11 @@ export const createRoomSchema = z.object({
   quizId: z.string().min(1)
 });
 
-export const joinRoomSchema = z.object({
-  roomCode: z.string().trim().min(4).max(12),
-  name: z.string().trim().min(1).max(40),
-  sessionId: z.string().trim().min(10).max(80)
+const joinRoomSchema = z.object({
+  roomCode: z.string(),
+  name: z.string(),
+  sessionId: z.string(),
+  phone: z.string().length(10), 
 });
 
 export const participantAuthSchema = z.object({

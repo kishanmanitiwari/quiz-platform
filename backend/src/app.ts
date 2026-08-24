@@ -179,31 +179,49 @@ app.post(
     const parsed = joinRoomSchema.safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: "Invalid join request" });
+      
     const room = await prisma.room.findUnique({
       where: { roomCode: parsed.data.roomCode.toUpperCase() },
     });
+    
     if (!room) return res.status(404).json({ error: "Invalid room code" });
+    
     if (room.status !== "WAITING") {
-      return res
-        .status(409)
-        .json({
-          error: "Quiz has already started. Please join the next session.",
-        });
+      return res.status(409).json({
+        error: "Quiz has already started. Please join the next session.",
+      });
     }
 
-    const participant = await prisma.participant.upsert({
-      where: {
-        roomId_sessionId: { roomId: room.id, sessionId: parsed.data.sessionId },
-      },
-      update: { name: cleanName(parsed.data.name) },
-      create: {
-        roomId: room.id,
-        sessionId: parsed.data.sessionId,
-        name: cleanName(parsed.data.name),
-      },
-    });
-    const state = await getPublicRoomState(prisma, room.id, participant.id);
-    res.status(201).json({ participant, state });
+    try {
+      const participant = await prisma.participant.upsert({
+        where: {
+          roomId_sessionId: { roomId: room.id, sessionId: parsed.data.sessionId },
+        },
+        update: { 
+          name: cleanName(parsed.data.name),
+          phone: parsed.data.phone // <-- Added phone here
+        },
+        create: {
+          roomId: room.id,
+          sessionId: parsed.data.sessionId,
+          name: cleanName(parsed.data.name),
+          phone: parsed.data.phone // <-- Added phone here
+        },
+      });
+      
+      const state = await getPublicRoomState(prisma, room.id, participant.id);
+      res.status(201).json({ participant, state });
+      
+    } catch (error: any) {
+      // Catch Prisma's Unique Constraint Violation (P2002) if phone already exists in this room
+      if (error.code === 'P2002') {
+        return res.status(400).json({ 
+          error: "You have already joined or played this quiz with this WhatsApp number!" 
+        });
+      }
+      // If it's a different error, pass it to your existing error handler
+      throw error; 
+    }
   }),
 );
 

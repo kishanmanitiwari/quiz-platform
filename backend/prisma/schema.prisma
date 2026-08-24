@@ -70,6 +70,7 @@ model Room {
 model Participant {
   id        String   @id @default(cuid())
   name      String
+  phone     String   // <-- NEW FIELD
   roomId    String
   sessionId String
   createdAt DateTime @default(now())
@@ -78,7 +79,8 @@ model Participant {
   answers   Answer[]
   result    Result?
 
-  @@unique([roomId, sessionId])
+  @@unique([roomId, phone])     // <-- NEW CONSTRAINT: Prevents same phone in the same room
+  @@unique([roomId, sessionId]) // Prevents same browser session in the same room
   @@index([roomId])
 }
 
@@ -88,11 +90,11 @@ model Answer {
   questionId     String
   selectedOption String
   submittedAt    DateTime    @default(now())
-  responseTime    Int
-  isCorrect       Boolean
-  score           Int
-  participant     Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
-  question        Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  responseTime   Int
+  isCorrect      Boolean
+  score          Int
+  participant    Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  question       Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
   @@unique([participantId, questionId])
   @@index([questionId])
