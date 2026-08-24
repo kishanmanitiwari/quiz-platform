@@ -141,6 +141,7 @@ export default function RoomPage({
     };
   }, [roomId]);
 
+  // Timer Countdown Logic
   useEffect(() => {
     const timer = window.setInterval(() => {
       const questionEndsAt =
@@ -155,6 +156,21 @@ export default function RoomPage({
     }, 250);
     return () => window.clearInterval(timer);
   }, [data?.room.questionEndsAt, state?.room.questionEndsAt]);
+
+  // --- NEW: Option A Auto-End Logic ---
+  const roomState = state?.room.status ?? data?.room.status;
+  const questionEndsAt = state?.room.questionEndsAt ?? data?.room.questionEndsAt;
+
+  useEffect(() => {
+    if (roomState === "QUESTION_ACTIVE" && secondsLeft === 0 && questionEndsAt) {
+      // The timer naturally hit zero, auto-end the question!
+      socket?.emit("question:end", { roomId }, (ack: { ok: boolean; error?: string }) => {
+        if (!ack.ok) setMessage(ack.error ?? "Failed to auto-end question");
+        void load();
+      });
+    }
+  }, [roomState, secondsLeft, questionEndsAt, roomId, socket]);
+  // ------------------------------------
 
   function emit(name: string) {
     socket?.emit(name, { roomId }, (ack: { ok: boolean; error?: string }) => {
@@ -204,16 +220,13 @@ export default function RoomPage({
 
   if (!data) return <main className="p-6">Loading...</main>;
   
-  const roomState = state?.room.status ?? data.room.status;
   const participants = state?.participants ?? data.room.participants;
   const currentQuestionNumber = state?.room.currentQuestion ?? data.room.currentQuestion;
   
-  // Gets full details including options for the active question
   const currentQuestion = data.room.quiz.questions.find(
     (question) => question.order === currentQuestionNumber,
   );
   
-  const questionEndsAt = state?.room.questionEndsAt ?? data.room.questionEndsAt;
   const timerExpired = questionEndsAt
     ? Date.now() >= new Date(questionEndsAt).getTime()
     : false;
@@ -237,7 +250,7 @@ export default function RoomPage({
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-3xl font-bold">Room {data.room.roomCode}</h1>
-              {getStatusBadge(roomState)}
+              {getStatusBadge(roomState as string)}
             </div>
             <p className="mt-1 text-sm text-slate-600">
               {data.room.quiz.title}
@@ -341,7 +354,6 @@ export default function RoomPage({
           </div>
         </div>
 
-        {/* Current Question and Options Display */}
         {(state?.currentQuestion || currentQuestion) && (
           <div className="mt-6 rounded-md border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -372,7 +384,6 @@ export default function RoomPage({
               )}
             </div>
 
-            {/* Render 4 Options like the user sees on their phone */}
             {currentQuestion && (
               <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {(["A", "B", "C", "D"] as const).map((letter) => {
