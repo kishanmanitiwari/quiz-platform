@@ -70,7 +70,7 @@ model Room {
 model Participant {
   id        String   @id @default(cuid())
   name      String
-  phone     String   // <-- NEW FIELD
+  phone     String   @unique  
   roomId    String
   sessionId String
   createdAt DateTime @default(now())
@@ -79,8 +79,7 @@ model Participant {
   answers   Answer[]
   result    Result?
 
-  @@unique([roomId, phone])     // <-- NEW CONSTRAINT: Prevents same phone in the same room
-  @@unique([roomId, sessionId]) // Prevents same browser session in the same room
+  @@unique([roomId, sessionId])
   @@index([roomId])
 }
 
