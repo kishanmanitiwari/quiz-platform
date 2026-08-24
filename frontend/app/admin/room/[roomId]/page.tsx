@@ -4,7 +4,7 @@ import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import { io, type Socket } from "socket.io-client";
-import { Maximize2, Play, Square } from "lucide-react";
+import { Maximize2, Play, Square, Loader2 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { SOCKET_URL } from "@/lib/config";
 
@@ -105,27 +105,47 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
 
   function emit(name: string) {
     socket?.emit(name, { roomId }, (ack: { ok: boolean; error?: string }) => {
-      setMessage(ack.ok ? "Done" : ack.error ?? "Action failed");
+      // Clear out older messages so we don't hold onto stale errors
+      setMessage(ack.ok ? "" : ack.error ?? "Action failed");
       void load();
     });
   }
 
   async function finish() {
     socket?.emit("quiz:finish", { roomId }, (ack: { ok: boolean; error?: string; leaderboard?: RoomPayload["leaderboard"] }) => {
-      setMessage(ack.ok ? "Room finished" : ack.error ?? "Finish failed");
+      setMessage(ack.ok ? "" : ack.error ?? "Finish failed");
       const leaderboard = ack.leaderboard;
       if (leaderboard) setData((current) => current ? { ...current, leaderboard } : current);
       void load();
     });
   }
 
+  // Visual Polish: Render color-coded tags based on room status
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "WAITING":
+        return <span className="rounded bg-slate-200 px-2 py-1 text-xs font-bold tracking-wide text-slate-800">WAITING</span>;
+      case "QUESTION_ACTIVE":
+        return <span className="animate-pulse rounded bg-emerald-500 px-2 py-1 text-xs font-bold tracking-wide text-white">LIVE</span>;
+      case "QUESTION_ENDED":
+      case "WAITING_FOR_NEXT":
+        return <span className="rounded bg-amber-400 px-2 py-1 text-xs font-bold tracking-wide text-amber-950">PAUSED</span>;
+      case "FINISHED":
+        return <span className="rounded bg-slate-800 px-2 py-1 text-xs font-bold tracking-wide text-white">FINISHED</span>;
+      default:
+        return <span className="rounded bg-slate-200 px-2 py-1 text-xs font-bold tracking-wide text-slate-800">{status}</span>;
+    }
+  };
+
   if (!data) return <main className="p-6">Loading...</main>;
+  
   const roomState = state?.room.status ?? data.room.status;
   const participants = state?.participants ?? data.room.participants;
   const currentQuestionNumber = state?.room.currentQuestion ?? data.room.currentQuestion;
   const currentQuestion = data.room.quiz.questions.find((question) => question.order === currentQuestionNumber);
   const questionEndsAt = state?.room.questionEndsAt ?? data.room.questionEndsAt;
   const timerExpired = questionEndsAt ? Date.now() >= new Date(questionEndsAt).getTime() : false;
+  
   const correctAnswer =
     currentQuestion && currentQuestion.correctOption
       ? `${currentQuestion.correctOption}. ${currentQuestion[`option${currentQuestion.correctOption}`]}`
@@ -136,30 +156,75 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
     <main className="min-h-screen px-4 py-8">
       <section className="mx-auto max-w-6xl">
         <Link href={`/admin/quiz/${data.room.quiz.id}`} className="text-sm font-semibold text-leaf">Back to quiz</Link>
+        
         <div className="mt-3 flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
-            <h1 className="text-3xl font-bold">Room {data.room.roomCode}</h1>
-            <p className="mt-1 text-sm text-slate-600">{data.room.quiz.title} - {roomState}</p>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold">Room {data.room.roomCode}</h1>
+              {getStatusBadge(roomState)}
+            </div>
+            <p className="mt-1 text-sm text-slate-600">{data.room.quiz.title}</p>
             <p className="mt-2 break-all text-sm text-slate-700">{joinUrl}</p>
           </div>
+          
+          {/* Dynamic Buttons Implementation */}
           <div className="flex flex-wrap gap-2">
-            <button className="focus-ring inline-flex items-center gap-2 rounded-md bg-leaf px-4 py-3 font-semibold text-white" onClick={() => emit("quiz:start")}>
-              <Play size={18} /> Start quiz
-            </button>
-            <button className="focus-ring inline-flex items-center gap-2 rounded-md bg-saffron px-4 py-3 font-semibold text-ink" onClick={() => emit("question:start")}>
-              <Play size={18} /> Start question
-            </button>
-            <button className="focus-ring inline-flex items-center gap-2 rounded-md bg-white px-4 py-3 font-semibold text-ink" onClick={() => emit("question:end")}>
-              <Square size={18} /> End question
-            </button>
-            <button className="focus-ring rounded-md bg-ink px-4 py-3 font-semibold text-white" onClick={finish}>Finish</button>
+            {roomState === "WAITING" && (
+              <button 
+                className="focus-ring inline-flex items-center gap-2 rounded-md bg-leaf px-4 py-3 font-semibold text-white transition-opacity hover:opacity-90" 
+                onClick={() => emit("quiz:start")}
+              >
+                <Play size={18} /> Start quiz
+              </button>
+            )}
+
+            {(roomState === "QUESTION_ENDED" || roomState === "WAITING_FOR_NEXT") && (
+              <button 
+                className="focus-ring inline-flex items-center gap-2 rounded-md bg-saffron px-4 py-3 font-semibold text-ink transition-opacity hover:opacity-90" 
+                onClick={() => emit("question:start")}
+              >
+                <Play size={18} /> {currentQuestionNumber > 0 ? "Next question" : "Start question"}
+              </button>
+            )}
+
+            {roomState === "QUESTION_ACTIVE" && (
+              <button 
+                className="focus-ring inline-flex items-center gap-2 rounded-md bg-red-600 px-4 py-3 font-semibold text-white transition-opacity hover:opacity-90" 
+                onClick={() => emit("question:end")}
+              >
+                <Square size={18} /> End question
+              </button>
+            )}
+
+            {roomState !== "FINISHED" && roomState !== "WAITING" && (
+              <button 
+                className="focus-ring rounded-md bg-ink px-4 py-3 font-semibold text-white transition-opacity hover:opacity-90" 
+                onClick={finish}
+              >
+                🏁 Finish Quiz
+              </button>
+            )}
           </div>
         </div>
-        {message && <p className="mt-4 text-sm text-slate-700">{message}</p>}
+        
+        {/* Only show message if it explicitly exists (like a socket connection failure) */}
+        {message && <p className="mt-4 text-sm font-semibold text-red-600">{message}</p>}
+
+        {/* Visual Polish: Active Loader & Countdown Banner */}
+        {roomState === "QUESTION_ACTIVE" && (
+          <div className="mt-6 flex items-center gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <Loader2 className="animate-spin text-emerald-600" size={20} />
+            <p className="text-sm font-semibold text-emerald-800">
+              Question is LIVE!
+              {secondsLeft > 0 && <span className="ml-2 font-mono">({secondsLeft}s remaining)</span>}
+            </p>
+          </div>
+        )}
+
         <div className="mt-8 grid gap-6 lg:grid-cols-[360px_1fr]">
           <div className="rounded-md border border-slate-200 bg-white p-4">
             {qr && <img src={qr} alt={`QR code for ${joinUrl}`} className="mx-auto h-auto w-full max-w-[320px]" />}
-            <button className="focus-ring mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-white px-4 py-3 font-semibold text-ink ring-1 ring-slate-300" onClick={() => qr && window.open(qr, "_blank")}>
+            <button className="focus-ring mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-white px-4 py-3 font-semibold text-ink ring-1 ring-slate-300 transition-colors hover:bg-slate-50" onClick={() => qr && window.open(qr, "_blank")}>
               <Maximize2 size={18} /> QR fullscreen
             </button>
           </div>
@@ -183,12 +248,14 @@ export default function RoomPage({ params }: { params: Promise<{ roomId: string 
             </div>
           </div>
         </div>
+        
         {state?.currentQuestion && (
           <div className="mt-6 rounded-md border border-slate-200 bg-white p-4">
             <p className="text-sm font-semibold text-leaf">Current question {state.currentQuestion.order}</p>
             <p className="mt-2 text-lg font-bold">{state.currentQuestion.text}</p>
           </div>
         )}
+        
         {showCorrectAnswer && correctAnswer && (
           <div className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 p-4">
             <p className="text-sm font-semibold text-emerald-800">Correct answer</p>
