@@ -138,30 +138,31 @@ app.post(
     const parsed = createRoomSchema.safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: parsed.error.flatten() });
-
+      
     const questionCount = await prisma.question.count({
       where: { quizId: parsed.data.quizId },
     });
-
-    if (questionCount !== 6)
+    
+    // UPDATED: Now allows your frontend 6 to 50 question selector
+    if (questionCount < 6 || questionCount > 50)
       return res
         .status(400)
-        .json({ error: "Quiz must have exactly 6 questions" });
+        .json({ error: "Quiz must have between 6 and 50 questions" });
 
     // 🧹 AUTO-CLEANUP: Delete any rooms older than 24 hours
-    // (Because of 'onDelete: SetNull' in your schema, this safely keeps user data intact!)
+    // (Safely keeps participant user data intact thanks to onDelete: SetNull)
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     await prisma.room.deleteMany({
       where: {
-        createdAt: { lt: yesterday },
-      },
+        createdAt: { lt: yesterday }
+      }
     });
 
     // Create the new room
     const room = await prisma.room.create({
       data: { quizId: parsed.data.quizId, roomCode: nanoid(6).toUpperCase() },
     });
-
+    
     res.status(201).json({ room });
   }),
 );
