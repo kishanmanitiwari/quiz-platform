@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum RoomStatus {
@@ -70,12 +69,15 @@ model Room {
 model Participant {
   id        String   @id @default(cuid())
   name      String
-  phone     String   @unique  
-  roomId    String
+  phone     String   @unique  // (Perfect - this enforces the 1 number rule)
+  
+  // CHANGE THESE TWO LINES:
+  roomId    String?  
+  room      Room?    @relation(fields: [roomId], references: [id], onDelete: SetNull) 
+  
   sessionId String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   answers   Answer[]
   result    Result?
 
@@ -101,14 +103,17 @@ model Answer {
 
 model Result {
   id             String      @id @default(cuid())
-  roomId         String
+  
+  // CHANGE THESE TWO LINES:
+  roomId         String?     
+  room           Room?       @relation(fields: [roomId], references: [id], onDelete: SetNull) 
+  
   participantId  String      @unique
   totalScore     Int
   correctAnswers Int
   totalTime      Int
   rank           Int
   createdAt      DateTime    @default(now())
-  room           Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
   participant    Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
 
   @@index([roomId, rank])

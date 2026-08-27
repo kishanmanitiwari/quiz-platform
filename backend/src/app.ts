@@ -50,7 +50,6 @@ app.use(express.json({ limit: "100kb" }));
 app.use(morgan("tiny"));
 app.use((rateLimit as any)({ windowMs: 60_000, max: 180 }));
 
-
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
@@ -139,17 +138,30 @@ app.post(
     const parsed = createRoomSchema.safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: parsed.error.flatten() });
+
     const questionCount = await prisma.question.count({
       where: { quizId: parsed.data.quizId },
     });
+
     if (questionCount !== 6)
       return res
         .status(400)
         .json({ error: "Quiz must have exactly 6 questions" });
 
+    // 🧹 AUTO-CLEANUP: Delete any rooms older than 24 hours
+    // (Because of 'onDelete: SetNull' in your schema, this safely keeps user data intact!)
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await prisma.room.deleteMany({
+      where: {
+        createdAt: { lt: yesterday },
+      },
+    });
+
+    // Create the new room
     const room = await prisma.room.create({
       data: { quizId: parsed.data.quizId, roomCode: nanoid(6).toUpperCase() },
     });
+
     res.status(201).json({ room });
   }),
 );
@@ -179,13 +191,13 @@ app.post(
     const parsed = joinRoomSchema.safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: "Invalid join request" });
-      
+
     const room = await prisma.room.findUnique({
       where: { roomCode: parsed.data.roomCode.toUpperCase() },
     });
-    
+
     if (!room) return res.status(404).json({ error: "Invalid room code" });
-    
+
     if (room.status !== "WAITING") {
       return res.status(409).json({
         error: "Quiz has already started. Please join the next session.",
@@ -195,32 +207,35 @@ app.post(
     try {
       const participant = await prisma.participant.upsert({
         where: {
-          roomId_sessionId: { roomId: room.id, sessionId: parsed.data.sessionId },
+          roomId_sessionId: {
+            roomId: room.id,
+            sessionId: parsed.data.sessionId,
+          },
         },
-        update: { 
+        update: {
           name: cleanName(parsed.data.name),
-          phone: parsed.data.phone // <-- Added phone here
+          phone: parsed.data.phone, // <-- Added phone here
         },
         create: {
           roomId: room.id,
           sessionId: parsed.data.sessionId,
           name: cleanName(parsed.data.name),
-          phone: parsed.data.phone // <-- Added phone here
+          phone: parsed.data.phone, // <-- Added phone here
         },
       });
-      
+
       const state = await getPublicRoomState(prisma, room.id, participant.id);
       res.status(201).json({ participant, state });
-      
     } catch (error: any) {
       // Catch Prisma's Unique Constraint Violation (P2002) if phone already exists in this room
-      if (error.code === 'P2002') {
-        return res.status(400).json({ 
-          error: "You have already joined or played this quiz with this WhatsApp number!" 
+      if (error.code === "P2002") {
+        return res.status(400).json({
+          error:
+            "You have already joined or played this quiz with this WhatsApp number!",
         });
       }
       // If it's a different error, pass it to your existing error handler
-      throw error; 
+      throw error;
     }
   }),
 );
