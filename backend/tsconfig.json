@@ -8,6 +8,7 @@
     "skipLibCheck": true,
     "outDir": "dist",
     "rootDir": ".",
+    "strictNullChecks": false,
     "resolveJsonModule": true
   },
   "include": ["src", "prisma", "scripts", "tests"]
