@@ -14,7 +14,10 @@ type State = {
     questionEndsAt: string | null;
     participantCount: number;
   };
-  quiz: { title: string; questionCount: number };
+  quiz: {
+    title: string;
+    questionCount: number;
+  };
   currentQuestion: null | {
     id: string;
     order: number;
@@ -27,6 +30,21 @@ type State = {
   };
   alreadyAnswered: boolean;
 };
+
+type Result = {
+  rank?: number;
+  totalScore?: number;
+  correctAnswers?: number;
+  totalQuestions?: number;
+};
+
+const QUOTES = [
+  "“The highest perfection of human life is to remember Krishna at all times.”",
+  "“One who is devoted to Me, and is free from attachment, fear and anger, is very dear to Me.”",
+  "“Always think of Me, become My devotee, worship Me and offer your homage unto Me.”",
+  "“There is no truth superior to Me.”",
+  "“A person who sees Me in everything and everything in Me is never lost to Me.”",
+];
 
 export default function JoinPage({
   params,
@@ -45,77 +63,158 @@ export default function JoinPage({
     name: string;
     sessionId: string;
   } | null>(null);
+
   const [state, setState] = useState<State | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [message, setMessage] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
 
+  const [quoteIndex, setQuoteIndex] = useState(0);
+  const [result, setResult] = useState<Result | null>(null);
+
+  // Restore participant
   useEffect(() => {
     const saved = localStorage.getItem(participantKey(roomCode));
-    if (saved) setParticipant(JSON.parse(saved));
+
+    if (saved) {
+      try {
+        setParticipant(JSON.parse(saved));
+      } catch {
+        localStorage.removeItem(participantKey(roomCode));
+      }
+    }
   }, [roomCode]);
 
+  // Socket connection
   useEffect(() => {
     if (!participant) return;
-    const client = io(SOCKET_URL, { transports: ["websocket"] });
+
+    const client = io(SOCKET_URL, {
+      transports: ["websocket"],
+    });
+
     const payload = {
       roomCode,
       participantId: participant.id,
       sessionId: participant.sessionId,
     };
+
     client.emit(
       "participant:reconnect",
       payload,
       (ack: { ok: boolean; state?: State; error?: string }) => {
-        if (ack.ok && ack.state) setState(ack.state);
-        if (!ack.ok) setMessage(ack.error ?? "Reconnect failed");
+        if (ack.ok && ack.state) {
+          setState(ack.state);
+        }
+
+        if (!ack.ok) {
+          setMessage(ack.error ?? "Reconnect failed");
+        }
       },
     );
+
     client.on("room:state", setState);
     client.on("question:start", setState);
-    client.on("question:end", ({ leaderboard }) =>
+
+    client.on("question:end", ({ leaderboard }) => {
       setMessage(
         `Leaderboard updated. Top score: ${leaderboard?.[0]?.totalScore ?? 0}`,
-      ),
-    );
-    client.on("quiz:finish", ({ leaderboard }) => {
-      setMessage(
-        `Final rank: ${leaderboard?.find((x: any) => x.participantId === participant.id)?.rank ?? "-"}`,
-      );
-      fetch(`${API_URL}/api/participants/${participant.id}/result`).then(
-        async (res) => {
-          if (res.ok)
-            setState((current) =>
-              current
-                ? { ...current, room: { ...current.room, status: "FINISHED" } }
-                : current,
-            );
-        },
       );
     });
+
+    client.on("quiz:finish", ({ leaderboard }) => {
+      const myResult = leaderboard?.find(
+        (x: any) => x.participantId === participant.id,
+      );
+
+      setResult({
+        rank: myResult?.rank,
+        totalScore: myResult?.totalScore,
+        correctAnswers: myResult?.correctAnswers,
+        totalQuestions: state?.quiz.questionCount,
+      });
+
+      setMessage("");
+
+      setState((current) =>
+        current
+          ? {
+              ...current,
+              room: {
+                ...current.room,
+                status: "FINISHED",
+              },
+            }
+          : current,
+      );
+
+      // Fetch final result once.
+      fetch(`${API_URL}/api/participants/${participant.id}/result`)
+        .then(async (res) => {
+          if (!res.ok) return;
+
+          const data = await res.json();
+
+          setResult((current) => ({
+            ...current,
+            ...data,
+          }));
+        })
+        .catch(() => {
+          // Leaderboard result is already available,
+          // so don't show an error for a secondary request.
+        });
+    });
+
     setSocket(client);
+
     return () => {
       client.close();
     };
   }, [participant, roomCode]);
 
+  // Question timer only runs while a question is active.
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (!state?.room.questionEndsAt) return setSecondsLeft(0);
+    if (!state?.room.questionEndsAt) {
+      setSecondsLeft(0);
+      return;
+    }
+
+    const updateTimer = () => {
       setSecondsLeft(
         Math.max(
           0,
           Math.ceil(
-            (new Date(state.room.questionEndsAt).getTime() - Date.now()) / 1000,
+            (new Date(state.room.questionEndsAt!).getTime() - Date.now()) /
+              1000,
           ),
         ),
       );
-    }, 250);
+    };
+
+    updateTimer();
+
+    const timer = window.setInterval(updateTimer, 500);
+
     return () => window.clearInterval(timer);
   }, [state?.room.questionEndsAt]);
 
+  // Rotate quotes only while waiting.
+  useEffect(() => {
+    if (!participant || !state) return;
+    if (state.room.status === "FINISHED") return;
+    if (state.room.status === "QUESTION_ACTIVE") return;
+
+    const timer = window.setInterval(() => {
+      setQuoteIndex((current) => (current + 1) % QUOTES.length);
+    }, 7000);
+
+    return () => window.clearInterval(timer);
+  }, [participant, state?.room.status]);
+
   const options = useMemo(() => {
     const q = state?.currentQuestion;
+
     return q
       ? [
           ["A", q.optionA],
@@ -128,20 +227,28 @@ export default function JoinPage({
 
   async function join() {
     setMessage("");
+
     const sessionId = getSessionId();
 
     try {
       const res = await fetch(`${API_URL}/api/join`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ roomCode, name, phone, sessionId }),
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          roomCode,
+          name,
+          phone,
+          sessionId,
+        }),
       });
 
       const body = await res.json();
 
       if (!res.ok) {
-        // Catch duplicate Prisma error strings or custom backend messages
         const errString = String(body.error || "").toLowerCase();
+
         if (
           errString.includes("unique") ||
           errString.includes("already") ||
@@ -151,6 +258,7 @@ export default function JoinPage({
             "You have already joined or played this quiz with this WhatsApp number!",
           );
         }
+
         return setMessage(body.error ?? "Could not join room");
       }
 
@@ -159,16 +267,19 @@ export default function JoinPage({
         name: body.participant.name,
         sessionId,
       };
+
       localStorage.setItem(participantKey(roomCode), JSON.stringify(saved));
+
       setParticipant(saved);
       setState(body.state);
-    } catch (err) {
+    } catch {
       setMessage("Network error. Please try again.");
     }
   }
 
   function answer(selectedOption: string) {
     if (!socket || !participant || !state?.currentQuestion) return;
+
     socket.emit(
       "answer:submit",
       {
@@ -184,30 +295,54 @@ export default function JoinPage({
             ? "Answer submitted. Waiting for next question..."
             : (ack.error ?? "Answer rejected"),
         );
-        if (ack.ok)
+
+        if (ack.ok) {
           setState((current) =>
-            current ? { ...current, alreadyAnswered: true } : current,
+            current
+              ? {
+                  ...current,
+                  alreadyAnswered: true,
+                }
+              : current,
           );
+        }
       },
     );
   }
 
-  // --- JOIN SCREEN (Unregistered User) ---
+  // ---------------------------------------------------------
+  // JOIN SCREEN
+  // ---------------------------------------------------------
+
   if (!participant) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-8">
-        <section className="mx-auto max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-wide text-leaf">
-            QuizSession {roomCode}
-          </p>
-          <h1 className="mt-2 text-3xl font-bold">ISKCON Event Quiz</h1>
+      <main className="min-h-screen bg-gradient-to-b from-slate-50 to-emerald-50/40 px-4 py-8">
+        <section className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/50">
+          <div className="text-center">
+            <p className="text-sm font-bold uppercase tracking-widest text-leaf">
+              Hare Krishna 🙏
+            </p>
+
+            <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              QuizSession {roomCode}
+            </p>
+
+            <h1 className="mt-4 text-3xl font-black tracking-tight text-slate-900">
+              ISKCON Event Quiz
+            </h1>
+
+            <p className="mt-2 text-sm text-slate-500">
+              Test your knowledge, have fun and remember Krishna.
+            </p>
+          </div>
 
           <div className="mt-8">
-            <label className="block text-sm font-semibold text-slate-800">
+            <label className="block text-sm font-bold text-slate-800">
               Your Name
             </label>
+
             <input
-              className="focus-ring mt-2 w-full rounded-md border border-slate-300 bg-white px-4 py-3"
+              className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={40}
@@ -216,33 +351,37 @@ export default function JoinPage({
           </div>
 
           <div className="mt-5">
-            <label className="block text-sm font-semibold text-slate-800">
+            <label className="block text-sm font-bold text-slate-800">
               WhatsApp Number
             </label>
+
             <input
               type="tel"
-              className="focus-ring mt-2 w-full rounded-md border border-slate-300 bg-white px-4 py-3"
+              inputMode="numeric"
+              className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
               value={phone}
               onChange={(e) =>
                 setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
               }
               placeholder="10-digit WhatsApp number"
             />
-            <p className="mt-2 text-xs font-medium text-slate-500">
-              * Results, gift coupons, and photos for today's event will be
-              shared on this number.
+
+            <p className="mt-2 text-xs font-medium leading-relaxed text-slate-500">
+              Results, gift coupons, and photos for today's event will be shared
+              on this number.
             </p>
           </div>
 
-          <div className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 p-4">
-            <p className="mb-3 text-center text-sm font-semibold text-emerald-900">
-              Mandatory: Join our community to play
+          <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="mb-3 text-center text-sm font-bold text-emerald-900">
+              Join the community to play
             </p>
+
             <a
               href="https://chat.whatsapp.com/YOUR_INVITE_LINK_HERE"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-3 font-bold text-white shadow-sm transition-opacity hover:opacity-90"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3.5 font-bold text-white shadow-sm transition hover:opacity-90"
             >
               💬 Step 1: Join WhatsApp Group
             </a>
@@ -254,22 +393,23 @@ export default function JoinPage({
                 checked={hasJoinedWa}
                 onChange={(e) => setHasJoinedWa(e.target.checked)}
               />
-              <span className="text-sm font-semibold text-slate-800">
+
+              <span className="text-sm font-semibold leading-relaxed text-slate-800">
                 Step 2: I confirm I have joined the ISKCON WhatsApp Community.
               </span>
             </label>
           </div>
 
           <button
-            className="focus-ring mt-6 w-full rounded-md bg-leaf px-4 py-3 font-bold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="focus-ring mt-6 w-full rounded-xl bg-leaf px-4 py-3.5 font-bold text-white shadow-md transition hover:-translate-y-0.5 hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!name.trim() || phone.length !== 10 || !hasJoinedWa}
             onClick={join}
           >
-            Enter Quiz
+            Enter Quiz →
           </button>
 
           {message && (
-            <div className="mt-4 rounded-md bg-red-50 p-3 text-center border border-red-100">
+            <div className="mt-4 rounded-xl border border-red-100 bg-red-50 p-3 text-center">
               <p className="text-sm font-semibold text-red-600">{message}</p>
             </div>
           )}
@@ -278,69 +418,284 @@ export default function JoinPage({
     );
   }
 
-  // --- LOADING SCREEN ---
-  if (!state) return <main className="p-6">Connecting...</main>;
+  // ---------------------------------------------------------
+  // LOADING
+  // ---------------------------------------------------------
 
-  // --- ACTIVE QUESTION SCREEN ---
+  if (!state) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+        <div className="text-center">
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-leaf" />
+
+          <p className="mt-4 font-semibold text-slate-700">
+            Connecting to the quiz...
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  // ---------------------------------------------------------
+  // ACTIVE QUESTION
+  // ---------------------------------------------------------
+
   if (state.room.status === "QUESTION_ACTIVE" && state.currentQuestion) {
     return (
-      <main className="min-h-screen px-4 py-6">
+      <main className="min-h-screen bg-slate-50 px-4 py-6">
         <section className="mx-auto max-w-xl">
-          <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
+          <div className="flex items-center justify-between text-sm font-bold text-slate-700">
             <span>
               Question {state.currentQuestion.order}/{state.quiz.questionCount}
             </span>
-            <span>{secondsLeft}s</span>
+
+            <span
+              className={`rounded-full px-3 py-1 ${
+                secondsLeft <= 5
+                  ? "bg-red-100 text-red-700"
+                  : "bg-emerald-100 text-leaf"
+              }`}
+            >
+              {secondsLeft}s
+            </span>
           </div>
-          <h1 className="mt-5 text-2xl font-bold">
+
+          <h1 className="mt-6 text-2xl font-black leading-tight text-slate-900">
             {state.currentQuestion.text}
           </h1>
-          <div className="mt-6 grid gap-3">
+
+          <div className="mt-7 grid gap-3">
             {options.map(([key, label]) => (
               <button
                 key={key}
                 disabled={state.alreadyAnswered}
                 onClick={() => answer(key)}
-                className="focus-ring rounded-md border border-slate-300 bg-white p-4 text-left font-semibold transition-colors hover:bg-slate-50 disabled:opacity-60"
+                className="focus-ring rounded-2xl border border-slate-200 bg-white p-5 text-left font-semibold shadow-sm transition hover:-translate-y-0.5 hover:border-leaf hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
               >
-                <span className="mr-2 text-leaf">{key}.</span>
+                <span className="mr-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-sm font-black text-leaf">
+                  {key}
+                </span>
+
                 {label}
               </button>
             ))}
           </div>
+
           {state.alreadyAnswered && (
-            <p className="mt-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
-              Answer submitted. Waiting for next question...
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-center">
+              <p className="font-bold text-amber-900">Hari Bol! 🙏</p>
+
+              <p className="mt-1 text-sm font-medium text-amber-800">
+                Answer submitted. Kindly wait for the next question...
+              </p>
+            </div>
+          )}
+
+          {message && (
+            <p className="mt-4 text-center text-sm font-semibold text-slate-600">
+              {message}
             </p>
           )}
-          {message && <p className="mt-4 text-sm text-slate-700">{message}</p>}
         </section>
       </main>
     );
   }
 
-  // --- WAITING / FINISHED SCREEN ---
+  // ---------------------------------------------------------
+  // FINISHED SCREEN
+  // ---------------------------------------------------------
+
+  if (state.room.status === "FINISHED") {
+    const rank = result?.rank;
+    const score = result?.totalScore;
+
+    return (
+      <main className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-slate-50 px-4 py-8">
+        <section className="mx-auto max-w-md">
+          <div className="text-center">
+            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-4xl shadow-sm">
+              🎉
+            </div>
+
+            <p className="mt-5 text-sm font-bold uppercase tracking-widest text-leaf">
+              Hare Krishna 🙏
+            </p>
+
+            <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-900">
+              Hari Bol!
+            </h1>
+
+            <p className="mt-2 text-slate-600">
+              You completed the quiz, {participant.name}.
+            </p>
+          </div>
+
+          <div className="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
+            <div className="bg-leaf px-6 py-5 text-center text-white">
+              <p className="text-sm font-bold uppercase tracking-widest opacity-80">
+                Your Result
+              </p>
+
+              <div className="mt-2 text-5xl font-black">{score ?? "—"}</div>
+
+              <p className="mt-1 text-sm font-semibold opacity-90">
+                Total Score
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 divide-x divide-slate-200">
+              <div className="p-5 text-center">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                  Rank
+                </p>
+
+                <p className="mt-1 text-3xl font-black text-slate-900">
+                  {rank ? `#${rank}` : "—"}
+                </p>
+              </div>
+
+              <div className="p-5 text-center">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                  Participants
+                </p>
+
+                <p className="mt-1 text-3xl font-black text-slate-900">
+                  {state.room.participantCount}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-5 text-center">
+            <p className="font-bold text-emerald-900">
+              Thank you for participating! 🙏
+            </p>
+
+            <p className="mt-2 text-sm leading-relaxed text-emerald-800">
+              Keep learning, keep serving and keep remembering Krishna.
+            </p>
+          </div>
+
+          <p className="mt-6 text-center text-sm font-semibold text-slate-500">
+            Final results are also available on the event screen.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
+  // ---------------------------------------------------------
+  // WAITING SCREEN
+  // ---------------------------------------------------------
+
   return (
-    <main className="min-h-screen px-4 py-8">
+    <main className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-slate-50 px-4 py-8">
       <section className="mx-auto max-w-md">
-        <p className="text-sm font-semibold uppercase tracking-wide text-leaf">
-          {participant.name}
-        </p>
-        <h1 className="mt-2 text-3xl font-bold">{state.quiz.title}</h1>
-        <div className="mt-8 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-lg font-semibold text-slate-900">
+        {/* Header */}
+        <div className="text-center">
+          <p className="text-sm font-bold uppercase tracking-widest text-leaf">
+            Hare Krishna 🙏
+          </p>
+
+          <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
             QuizSession {roomCode}
           </p>
-          <p className="mt-2 font-medium text-slate-700">
-            {state.room.status === "FINISHED"
-              ? "Quiz finished! Check the big screen for the final results."
-              : "Waiting for the quiz to start..."}
-          </p>
-          <p className="mt-4 inline-block rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-leaf">
-            {state.room.participantCount} participants joined
+
+          <h1 className="mt-4 text-3xl font-black tracking-tight text-slate-900">
+            You're In!
+          </h1>
+
+          <p className="mt-2 text-slate-600">
+            Welcome,{" "}
+            <span className="font-bold text-slate-900">{participant.name}</span>
           </p>
         </div>
-        {message && <p className="mt-4 text-sm text-slate-700">{message}</p>}
+
+        {/* Waiting card */}
+        <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-xl shadow-slate-200/50">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50">
+            <span className="text-3xl">🙏</span>
+          </div>
+
+          <h2 className="mt-4 text-xl font-black text-slate-900">
+            Waiting for the quiz to begin
+          </h2>
+
+          <p className="mt-2 text-sm leading-relaxed text-slate-500">
+            Stay on this screen. The quiz will start automatically.
+          </p>
+
+          {/* Live participant count */}
+          <div className="mt-6 flex items-center justify-center gap-3 rounded-2xl bg-slate-50 px-4 py-4">
+            <span className="text-2xl">👥</span>
+
+            <div className="text-left">
+              <p className="text-2xl font-black text-slate-900">
+                {state.room.participantCount}
+              </p>
+
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                devotees joined
+              </p>
+            </div>
+
+            <span className="ml-2 h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
+          </div>
+        </div>
+
+        {/* Quote */}
+        <div className="mt-5 rounded-3xl border border-amber-100 bg-amber-50 p-6">
+          <p className="text-center text-xs font-bold uppercase tracking-widest text-amber-700">
+            Krishna Conscious Thought
+          </p>
+
+          <p
+            key={quoteIndex}
+            className="mt-4 text-center text-base font-semibold leading-relaxed text-amber-950"
+          >
+            {QUOTES[quoteIndex]}
+          </p>
+
+          <div className="mt-5 flex justify-center gap-1.5">
+            {QUOTES.map((_, index) => (
+              <span
+                key={index}
+                className={`h-1.5 rounded-full transition-all ${
+                  index === quoteIndex
+                    ? "w-5 bg-amber-600"
+                    : "w-1.5 bg-amber-300"
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Quiz info */}
+        <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-500">Quiz</span>
+
+            <span className="text-sm font-bold text-slate-900">
+              {state.quiz.title}
+            </span>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+            <span className="text-sm font-semibold text-slate-500">
+              Questions
+            </span>
+
+            <span className="text-sm font-bold text-slate-900">
+              {state.quiz.questionCount}
+            </span>
+          </div>
+        </div>
+
+        {message && (
+          <p className="mt-4 text-center text-sm font-semibold text-slate-600">
+            {message}
+          </p>
+        )}
       </section>
     </main>
   );
