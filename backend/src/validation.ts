@@ -29,8 +29,11 @@ export const createRoomSchema = z.object({
 export const joinRoomSchema = z.object({
   roomCode: z.string(),
   name: z.string(),
+  phone: z.string(),
   sessionId: z.string(),
-  phone: z.string().length(10), 
+  age: z.number().optional(),     
+  gender: z.string().optional(),  
+  communityCode: z.string().optional(), 
 });
 
 export const participantAuthSchema = z.object({

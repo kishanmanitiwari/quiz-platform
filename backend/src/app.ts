@@ -154,14 +154,11 @@ app.post(
       where: { quizId: parsed.data.quizId },
     });
 
-    // UPDATED: Now allows your frontend 6 to 50 question selector
     if (questionCount < 6 || questionCount > 50)
       return res
         .status(400)
         .json({ error: "Quiz must have between 6 and 50 questions" });
 
-    // 🧹 AUTO-CLEANUP: Delete any rooms older than 24 hours
-    // (Safely keeps participant user data intact thanks to onDelete: SetNull)
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     await prisma.room.deleteMany({
       where: {
@@ -169,7 +166,6 @@ app.post(
       },
     });
 
-    // Create the new room
     const room = await prisma.room.create({
       data: { quizId: parsed.data.quizId, roomCode: nanoid(6).toUpperCase() },
     });
@@ -200,6 +196,14 @@ app.get(
 app.post(
   "/api/join",
   asyncHandler(async (req, res) => {
+    // 1. Check Community Code First
+    const requiredCode = process.env.COMMUNITY_CODE || "ISKCON108";
+    if (req.body.communityCode !== requiredCode) {
+      return res.status(400).json({ 
+        error: "Invalid Community Code. Please check the WhatsApp group description." 
+      });
+    }
+
     const parsed = joinRoomSchema.safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: "Invalid join request" });
@@ -226,27 +230,29 @@ app.post(
         },
         update: {
           name: cleanName(parsed.data.name),
-          phone: parsed.data.phone, // <-- Added phone here
+          phone: parsed.data.phone,
+          age: Number(req.body.age),      // <-- NEW
+          gender: String(req.body.gender) // <-- NEW
         },
         create: {
           roomId: room.id,
           sessionId: parsed.data.sessionId,
           name: cleanName(parsed.data.name),
-          phone: parsed.data.phone, // <-- Added phone here
+          phone: parsed.data.phone,
+          age: Number(req.body.age),      // <-- NEW
+          gender: String(req.body.gender) // <-- NEW
         },
       });
 
       const state = await getPublicRoomState(prisma, room.id, participant.id);
       res.status(201).json({ participant, state });
     } catch (error: any) {
-      // Catch Prisma's Unique Constraint Violation (P2002) if phone already exists in this room
       if (error.code === "P2002") {
         return res.status(400).json({
           error:
             "You have already joined or played this quiz with this WhatsApp number!",
         });
       }
-      // If it's a different error, pass it to your existing error handler
       throw error;
     }
   }),

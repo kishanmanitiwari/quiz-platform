@@ -54,9 +54,16 @@ export default function JoinPage({
   const { roomCode: rawRoomCode } = use(params);
   const roomCode = rawRoomCode.toUpperCase();
 
+  // 1. Added Age, Gender, and Community Code state
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [age, setAge] = useState("");
+  const [gender, setGender] = useState("");
   const [hasJoinedWa, setHasJoinedWa] = useState(false);
+  const [communityCode, setCommunityCode] = useState("");
+  
+  // 3. State to track if the 2-hour token/cookie is active
+  const [isOnCooldown, setIsOnCooldown] = useState(false);
 
   const [participant, setParticipant] = useState<{
     id: string;
@@ -71,6 +78,17 @@ export default function JoinPage({
 
   const [quoteIndex, setQuoteIndex] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
+
+  // ---------------------------------------------------------
+  // CHECK COOLDOWN (2hr replay prevention)
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      if (document.cookie.includes("quiz_cooldown=true")) {
+        setIsOnCooldown(true);
+      }
+    }
+  }, []);
 
   // ---------------------------------------------------------
   // RESTORE PARTICIPANT
@@ -130,8 +148,6 @@ export default function JoinPage({
       setState(newState);
     });
 
-    // IMPORTANT:
-    // Explicitly reset alreadyAnswered when a NEW question starts.
     client.on("question:start", (newState: State) => {
       setState({
         ...newState,
@@ -139,22 +155,22 @@ export default function JoinPage({
       });
 
       setMessage("");
-
-      // Remove browser focus from the previous answer button.
       requestAnimationFrame(() => {
         (document.activeElement as HTMLElement | null)?.blur();
       });
     });
 
     client.on("question:end", ({ leaderboard }) => {
-      // Don't show repetitive "waiting" messages.
-      // The UI itself communicates that the answer is locked.
-      if (leaderboard?.[0]) {
-        // Intentionally no UI message here.
-      }
+      if (leaderboard?.[0]) {}
     });
 
     client.on("quiz:finish", ({ leaderboard }) => {
+      // ---------------------------------------------------------
+      // APPLY 2-HOUR COOLDOWN ONCE THEY HAVE FINISHED THE QUIZ
+      // ---------------------------------------------------------
+      document.cookie = "quiz_cooldown=true; max-age=7200; path=/";
+      setIsOnCooldown(true);
+
       const myResult = leaderboard?.find(
         (x: any) => x.participantId === participant.id
       );
@@ -181,21 +197,16 @@ export default function JoinPage({
           : current
       );
 
-      // Fetch final result once.
       fetch(`${API_URL}/api/participants/${participant.id}/result`)
         .then(async (res) => {
           if (!res.ok) return;
-
           const data = await res.json();
-
           setResult((current) => ({
             ...current,
             ...data,
           }));
         })
-        .catch(() => {
-          // Leaderboard data is already available.
-        });
+        .catch(() => {});
     });
 
     setSocket(client);
@@ -232,14 +243,10 @@ export default function JoinPage({
     };
 
     updateTimer();
-
     const timer = window.setInterval(updateTimer, 500);
 
     return () => window.clearInterval(timer);
-  }, [
-    state?.room.status,
-    state?.room.questionEndsAt,
-  ]);
+  }, [state?.room.status, state?.room.questionEndsAt]);
 
   // ---------------------------------------------------------
   // WAITING SCREEN QUOTES
@@ -284,7 +291,6 @@ export default function JoinPage({
 
   async function join() {
     setMessage("");
-
     const sessionId = getSessionId();
 
     try {
@@ -297,6 +303,9 @@ export default function JoinPage({
           roomCode,
           name,
           phone,
+          age: Number(age),         // Added age
+          gender,                   // Added gender
+          communityCode,            // Added unique code
           sessionId,
         }),
       });
@@ -316,9 +325,7 @@ export default function JoinPage({
           );
         }
 
-        return setMessage(
-          body.error ?? "Could not join room"
-        );
+        return setMessage(body.error ?? "Could not join room");
       }
 
       const saved = {
@@ -365,21 +372,13 @@ export default function JoinPage({
         questionId: state.currentQuestion.id,
         selectedOption,
       },
-      (ack: {
-        ok: boolean;
-        error?: string;
-      }) => {
+      (ack: { ok: boolean; error?: string }) => {
         if (!ack.ok) {
-          setMessage(
-            ack.error ?? "Answer rejected"
-          );
+          setMessage(ack.error ?? "Answer rejected");
           return;
         }
 
-        // Clear any old message.
         setMessage("");
-
-        // Lock the current question.
         setState((current) =>
           current
             ? {
@@ -389,9 +388,6 @@ export default function JoinPage({
             : current
         );
 
-        // IMPORTANT:
-        // Prevent the clicked button from retaining browser focus
-        // when the next question renders.
         requestAnimationFrame(() => {
           (document.activeElement as HTMLElement | null)?.blur();
         });
@@ -411,15 +407,12 @@ export default function JoinPage({
             <p className="text-sm font-bold uppercase tracking-widest text-leaf">
               Hare Krishna 🙏
             </p>
-
             <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
               QuizSession {roomCode}
             </p>
-
             <h1 className="mt-4 text-3xl font-black tracking-tight text-slate-900">
               ISKCON Event Quiz
             </h1>
-
             <p className="mt-2 text-sm text-slate-500">
               Test your knowledge, have fun and remember Krishna.
             </p>
@@ -429,7 +422,6 @@ export default function JoinPage({
             <label className="block text-sm font-bold text-slate-800">
               Your Name
             </label>
-
             <input
               className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
               value={name}
@@ -443,26 +435,44 @@ export default function JoinPage({
             <label className="block text-sm font-bold text-slate-800">
               WhatsApp Number
             </label>
-
             <input
               type="tel"
               inputMode="numeric"
               className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
               value={phone}
               onChange={(e) =>
-                setPhone(
-                  e.target.value
-                    .replace(/\D/g, "")
-                    .slice(0, 10)
-                )
+                setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
               }
               placeholder="10-digit WhatsApp number"
             />
+          </div>
 
-            <p className="mt-2 text-xs font-medium leading-relaxed text-slate-500">
-              Results, gift coupons, and photos for today's
-              event will be shared on this number.
-            </p>
+          <div className="mt-5 grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-800">Age</label>
+              <input
+                type="number"
+                className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                placeholder="e.g. 25"
+                min="1"
+                max="120"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-800">Gender</label>
+              <select
+                className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+              >
+                <option value="" disabled>Select</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
           </div>
 
           <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
@@ -484,35 +494,58 @@ export default function JoinPage({
                 type="checkbox"
                 className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
                 checked={hasJoinedWa}
-                onChange={(e) =>
-                  setHasJoinedWa(e.target.checked)
-                }
+                onChange={(e) => setHasJoinedWa(e.target.checked)}
               />
-
               <span className="text-sm font-semibold leading-relaxed text-slate-800">
-                Step 2: I confirm I have joined the ISKCON
-                WhatsApp Community.
+                Step 2: I confirm I have joined the ISKCON WhatsApp Community.
               </span>
             </label>
+
+            {/* Unique Code Block */}
+            <div className="mt-4 border-t border-emerald-200 pt-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-bold text-emerald-900">
+                  Step 3: Enter Community Code
+                </span>
+                <input
+                  type="text"
+                  className="focus-ring w-full rounded-xl border border-emerald-300 bg-white px-4 py-3 outline-none transition focus:border-emerald-600"
+                  value={communityCode}
+                  onChange={(e) => setCommunityCode(e.target.value)}
+                  placeholder="Code from community description"
+                />
+              </label>
+            </div>
           </div>
 
-          <button
-            className="focus-ring mt-6 w-full rounded-xl bg-leaf px-4 py-3.5 font-bold text-white shadow-md transition hover:-translate-y-0.5 hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={
-              !name.trim() ||
-              phone.length !== 10 ||
-              !hasJoinedWa
-            }
-            onClick={join}
-          >
-            Enter Quiz →
-          </button>
+          {/* Conditional rendering for 2hr cooldown block */}
+          {isOnCooldown ? (
+            <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-center shadow-sm">
+              <p className="font-bold text-amber-900">Cooldown Active ⏳</p>
+              <p className="mt-1 text-sm font-medium text-amber-800">
+                You have already completed the quiz. Please wait 2 hours before playing again.
+              </p>
+            </div>
+          ) : (
+            <button
+              className="focus-ring mt-6 w-full rounded-xl bg-leaf px-4 py-3.5 font-bold text-white shadow-md transition hover:-translate-y-0.5 hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={
+                !name.trim() ||
+                phone.length !== 10 ||
+                !age ||
+                !gender ||
+                !communityCode.trim() ||
+                !hasJoinedWa
+              }
+              onClick={join}
+            >
+              Enter Quiz →
+            </button>
+          )}
 
           {message && (
             <div className="mt-4 rounded-xl border border-red-100 bg-red-50 p-3 text-center">
-              <p className="text-sm font-semibold text-red-600">
-                {message}
-              </p>
+              <p className="text-sm font-semibold text-red-600">{message}</p>
             </div>
           )}
         </section>
@@ -529,7 +562,6 @@ export default function JoinPage({
       <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
         <div className="text-center">
           <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-leaf" />
-
           <p className="mt-4 font-semibold text-slate-700">
             Connecting to the quiz...
           </p>
@@ -542,22 +574,14 @@ export default function JoinPage({
   // ACTIVE QUESTION
   // ---------------------------------------------------------
 
-  if (
-    state.room.status === "QUESTION_ACTIVE" &&
-    state.currentQuestion
-  ) {
+  if (state.room.status === "QUESTION_ACTIVE" && state.currentQuestion) {
     return (
       <main className="min-h-screen bg-slate-50 px-4 py-6">
-        <section
-          key={state.currentQuestion.id}
-          className="mx-auto max-w-xl"
-        >
+        <section key={state.currentQuestion.id} className="mx-auto max-w-xl">
           <div className="flex items-center justify-between text-sm font-bold text-slate-700">
             <span>
-              Question {state.currentQuestion.order}/
-              {state.quiz.questionCount}
+              Question {state.currentQuestion.order}/{state.quiz.questionCount}
             </span>
-
             <span
               className={`rounded-full px-3 py-1 ${
                 secondsLeft <= 5
@@ -585,7 +609,6 @@ export default function JoinPage({
                 <span className="mr-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-sm font-black text-leaf">
                   {key}
                 </span>
-
                 {label}
               </button>
             ))}
@@ -593,10 +616,7 @@ export default function JoinPage({
 
           {state.alreadyAnswered && (
             <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
-              <p className="font-bold text-emerald-900">
-                Answer locked ✓
-              </p>
-
+              <p className="font-bold text-emerald-900">Answer locked ✓</p>
               <p className="mt-1 text-sm font-medium text-emerald-800">
                 Get ready for the next question.
               </p>
@@ -628,15 +648,12 @@ export default function JoinPage({
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-4xl shadow-sm">
               🎉
             </div>
-
             <p className="mt-5 text-sm font-bold uppercase tracking-widest text-leaf">
               Hare Krishna 🙏
             </p>
-
             <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-900">
               Hari Bol!
             </h1>
-
             <p className="mt-2 text-slate-600">
               You completed the quiz,{" "}
               <span className="font-bold text-slate-900">
@@ -651,10 +668,7 @@ export default function JoinPage({
               <p className="text-sm font-bold uppercase tracking-widest opacity-80">
                 Your Score
               </p>
-
-              <div className="mt-2 text-5xl font-black">
-                {score ?? "—"}
-              </div>
+              <div className="mt-2 text-5xl font-black">{score ?? "—"}</div>
             </div>
 
             <div className="grid grid-cols-2 divide-x divide-slate-200">
@@ -662,7 +676,6 @@ export default function JoinPage({
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
                   Rank
                 </p>
-
                 <p className="mt-1 text-3xl font-black text-slate-900">
                   {rank ? `#${rank}` : "—"}
                 </p>
@@ -672,7 +685,6 @@ export default function JoinPage({
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
                   Participants
                 </p>
-
                 <p className="mt-1 text-3xl font-black text-slate-900">
                   {state.room.participantCount}
                 </p>
@@ -684,10 +696,8 @@ export default function JoinPage({
             <p className="font-bold text-emerald-900">
               Thank you for participating! 🙏
             </p>
-
             <p className="mt-2 text-sm leading-relaxed text-emerald-800">
-              Keep learning, keep serving and keep remembering
-              Krishna.
+              Keep learning, keep serving and keep remembering Krishna.
             </p>
           </div>
 
@@ -706,20 +716,16 @@ export default function JoinPage({
   return (
     <main className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-slate-50 px-4 py-8">
       <section className="mx-auto max-w-md">
-        {/* Header */}
         <div className="text-center">
           <p className="text-sm font-bold uppercase tracking-widest text-leaf">
             Hare Krishna 🙏
           </p>
-
           <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
             QuizSession {roomCode}
           </p>
-
           <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-900">
             You're In!
           </h1>
-
           <p className="mt-2 text-slate-600">
             Welcome,{" "}
             <span className="font-bold text-slate-900">
@@ -728,51 +734,41 @@ export default function JoinPage({
           </p>
         </div>
 
-        {/* Waiting card */}
         <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-xl shadow-slate-200/50">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50">
             <span className="text-3xl">🙏</span>
           </div>
-
           <h2 className="mt-4 text-xl font-black text-slate-900">
             Waiting for the quiz to begin
           </h2>
-
           <p className="mt-2 text-sm leading-relaxed text-slate-500">
             Stay on this screen. The quiz will start automatically.
           </p>
 
-          {/* Live participant count */}
           <div className="mt-6 flex items-center justify-center gap-3 rounded-2xl bg-slate-50 px-4 py-4">
             <span className="text-2xl">👥</span>
-
             <div className="text-left">
               <p className="text-2xl font-black text-slate-900">
                 {state.room.participantCount}
               </p>
-
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 devotees joined
               </p>
             </div>
-
             <span className="ml-2 h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
           </div>
         </div>
 
-        {/* Rotating quote */}
         <div className="mt-5 rounded-3xl border border-amber-100 bg-amber-50 p-6">
           <p className="text-center text-xs font-bold uppercase tracking-widest text-amber-700">
             Krishna-Conscious Thought
           </p>
-
           <p
             key={quoteIndex}
             className="mt-4 min-h-[72px] text-center text-base font-semibold leading-relaxed text-amber-950"
           >
             {QUOTES[quoteIndex]}
           </p>
-
           <div className="mt-5 flex justify-center gap-1.5">
             {QUOTES.map((_, index) => (
               <span
