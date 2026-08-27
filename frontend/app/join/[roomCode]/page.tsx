@@ -124,7 +124,7 @@ export default function JoinPage({ params }: { params: Promise<{ roomCode: strin
     return (
       <main className="min-h-screen bg-slate-50 px-4 py-8">
         <section className="mx-auto max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-wide text-leaf">Room {roomCode}</p>
+          <p className="text-sm font-semibold uppercase tracking-wide text-leaf">QuizSession {roomCode}</p>
           <h1 className="mt-2 text-3xl font-bold">ISKCON Event Quiz</h1>
           
           <div className="mt-8">
@@ -230,7 +230,7 @@ export default function JoinPage({ params }: { params: Promise<{ roomCode: strin
         <p className="text-sm font-semibold uppercase tracking-wide text-leaf">{participant.name}</p>
         <h1 className="mt-2 text-3xl font-bold">{state.quiz.title}</h1>
         <div className="mt-8 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-lg font-semibold text-slate-900">Room {roomCode}</p>
+          <p className="text-lg font-semibold text-slate-900">QuizSession {roomCode}</p>
           <p className="mt-2 font-medium text-slate-700">{state.room.status === "FINISHED" ? "Quiz finished! Check the big screen for the final results." : "Waiting for the quiz to start..."}</p>
           <p className="mt-4 inline-block rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-leaf">{state.room.participantCount} participants joined</p>
         </div>

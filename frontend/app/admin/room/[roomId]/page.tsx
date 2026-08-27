@@ -1,10 +1,10 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import { io, type Socket } from "socket.io-client";
-import { Maximize2, Play, Square, Loader2, Trophy, Medal } from "lucide-react";
+import { Maximize2, Play, FastForward, Loader2, Trophy, Medal } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { SOCKET_URL } from "@/lib/config";
 
@@ -64,6 +64,9 @@ export default function RoomPage({
   const [qr, setQr] = useState("");
   const [message, setMessage] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
+  
+  // Track if we have already automatically ended the current question
+  const hasAutoEndedRef = useRef(false);
 
   const joinUrl = useMemo(() => {
     if (!data) return "";
@@ -141,27 +144,44 @@ export default function RoomPage({
     };
   }, [roomId]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const questionEndsAt =
-        state?.room.questionEndsAt ?? data?.room.questionEndsAt;
-      if (!questionEndsAt) return setSecondsLeft(0);
-      setSecondsLeft(
-        Math.max(
-          0,
-          Math.ceil((new Date(questionEndsAt).getTime() - Date.now()) / 1000),
-        ),
-      );
-    }, 250);
-    return () => window.clearInterval(timer);
-  }, [data?.room.questionEndsAt, state?.room.questionEndsAt]);
-
   function emit(name: string) {
     socket?.emit(name, { roomId }, (ack: { ok: boolean; error?: string }) => {
       setMessage(ack.ok ? "" : (ack.error ?? "Action failed"));
       void load();
     });
   }
+
+  // Timer Tick Hook
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const questionEndsAt = state?.room.questionEndsAt ?? data?.room.questionEndsAt;
+      if (!questionEndsAt) return setSecondsLeft(0);
+      setSecondsLeft(
+        Math.max(0, Math.ceil((new Date(questionEndsAt).getTime() - Date.now()) / 1000)),
+      );
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [data?.room.questionEndsAt, state?.room.questionEndsAt]);
+
+  const roomState = state?.room.status ?? data?.room.status ?? "WAITING";
+  const questionEndsAt = state?.room.questionEndsAt ?? data?.room.questionEndsAt;
+
+  // Auto-End Hook: Automatically fires when the clock hits exactly 0
+  useEffect(() => {
+    // Reset our auto-end tracker if a new question is actively ticking
+    if (roomState === "QUESTION_ACTIVE" && secondsLeft > 0) {
+      hasAutoEndedRef.current = false;
+    }
+
+    // If active, clock is 0, and we haven't fired it yet...
+    if (roomState === "QUESTION_ACTIVE" && secondsLeft === 0 && questionEndsAt && !hasAutoEndedRef.current) {
+      const hasExpired = Date.now() >= new Date(questionEndsAt).getTime();
+      if (hasExpired) {
+        hasAutoEndedRef.current = true;
+        emit("question:end"); // Trigger the server automatically!
+      }
+    }
+  }, [secondsLeft, roomState, questionEndsAt]);
 
   async function finish() {
     if (!window.confirm("Are you sure you want to end the entire quiz session? This action cannot be undone.")) return;
@@ -204,7 +224,6 @@ export default function RoomPage({
 
   if (!data) return <main className="p-6">Loading...</main>;
   
-  const roomState = state?.room.status ?? data.room.status;
   const participants = state?.participants ?? data.room.participants;
   const currentQuestionNumber = state?.room.currentQuestion ?? data.room.currentQuestion;
   
@@ -212,7 +231,6 @@ export default function RoomPage({
     (question) => question.order === currentQuestionNumber,
   );
   
-  const questionEndsAt = state?.room.questionEndsAt ?? data.room.questionEndsAt;
   const timerExpired = questionEndsAt
     ? Date.now() >= new Date(questionEndsAt).getTime()
     : false;
@@ -238,7 +256,7 @@ export default function RoomPage({
         <div className="mt-3 flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold">Room {data.room.roomCode}</h1>
+              <h1 className="text-3xl font-bold">QuizSession {data.room.roomCode}</h1>
               {getStatusBadge(roomState)}
             </div>
             <p className="mt-1 text-sm text-slate-600 font-medium">
@@ -254,27 +272,51 @@ export default function RoomPage({
           {/* Controls hide entirely if the room is finished */}
           {roomState !== "FINISHED" && (
             <div className="flex flex-wrap gap-3">
-              <button
-                className="focus-ring inline-flex items-center gap-2 rounded-md bg-leaf px-5 py-3 font-bold text-white transition-opacity hover:opacity-90 shadow-sm"
-                onClick={() => emit("quiz:start")}
-              >
-                <Play size={18} /> 1. Start Room
-              </button>
+              
+              {/* Show "Start Room" ONLY when waiting */}
+              {roomState === "WAITING" && (
+                <button
+                  className="focus-ring inline-flex items-center gap-2 rounded-md bg-leaf px-5 py-3 font-bold text-white transition-opacity hover:opacity-90 shadow-sm"
+                  onClick={() => emit("quiz:start")}
+                >
+                  <Play size={18} /> Start Quiz Session
+                </button>
+              )}
 
-              <button
-                className="focus-ring inline-flex items-center gap-2 rounded-md bg-saffron px-5 py-3 font-bold text-ink transition-opacity hover:opacity-90 shadow-sm"
-                onClick={() => emit("question:start")}
-              >
-                <Play size={18} /> {currentQuestionNumber > 0 ? "2. Next Question" : "2. Start First Question"}
-              </button>
-
-              <button
-                className="focus-ring inline-flex items-center gap-2 rounded-md bg-white border border-slate-300 px-5 py-3 font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-red-600 shadow-sm"
-                onClick={() => emit("question:end")}
-                title="Use this if everyone finishes before the timer runs out"
-              >
-                <Square size={18} /> End Early
-              </button>
+              {/* Force sequential clicking based on server state */}
+              {roomState !== "WAITING" && (
+                <>
+                  {roomState === "QUESTION_ACTIVE" ? (
+                    <button
+                      className={`focus-ring inline-flex items-center gap-2 rounded-md px-5 py-3 font-bold transition-colors shadow-sm ${
+                        secondsLeft > 0 
+                          ? "border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100" 
+                          : "bg-slate-200 text-slate-500 cursor-not-allowed"
+                      }`}
+                      onClick={() => emit("question:end")}
+                      disabled={secondsLeft === 0}
+                      title="Reveal answers and leaderboard"
+                    >
+                      {secondsLeft > 0 ? (
+                        <>
+                          <FastForward size={18} /> Skip Remaining Time
+                        </>
+                      ) : (
+                        <>
+                          <Loader2 size={18} className="animate-spin" /> Fetching Results...
+                        </>
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      className="focus-ring inline-flex items-center gap-2 rounded-md bg-saffron px-5 py-3 font-bold text-ink transition-opacity hover:opacity-90 shadow-sm"
+                      onClick={() => emit("question:start")}
+                    >
+                      <Play size={18} /> {currentQuestionNumber > 0 ? "Start Next Question" : "Start First Question"}
+                    </button>
+                  )}
+                </>
+              )}
 
               <button
                 className="focus-ring rounded-md bg-slate-900 px-5 py-3 font-bold text-white transition-opacity hover:opacity-90 shadow-sm"
@@ -297,7 +339,6 @@ export default function RoomPage({
             {/* 🏆 GRAND WINNER SECTION */}
             {winner ? (
               <div className="relative mx-auto mb-12 max-w-4xl overflow-hidden rounded-[2rem] bg-gradient-to-br from-amber-400 via-yellow-400 to-orange-500 p-16 shadow-[0_10px_50px_rgba(251,191,36,0.4)] border-4 border-yellow-200">
-                {/* CSS Balloons and Confetti */}
                 <div className="absolute left-8 top-8 animate-bounce text-7xl opacity-90 drop-shadow-md">🎈</div>
                 <div className="absolute right-12 top-16 animate-pulse text-7xl opacity-90 drop-shadow-md">🎉</div>
                 <div className="absolute bottom-12 left-16 animate-bounce text-6xl opacity-90 drop-shadow-md" style={{ animationDelay: '0.2s' }}>🎊</div>
@@ -323,10 +364,10 @@ export default function RoomPage({
                     let badgeClass = "bg-white border-slate-200 text-slate-700";
                     let rankIcon = <span className="font-black text-slate-400">#{row.rank}</span>;
 
-                    if (index === 0) { // Originally Rank 2
+                    if (index === 0) { 
                       badgeClass = "bg-slate-100 border-slate-300 text-slate-800";
                       rankIcon = <Medal className="h-6 w-6 text-slate-500" />;
-                    } else if (index === 1) { // Originally Rank 3
+                    } else if (index === 1) { 
                       badgeClass = "bg-orange-100 border-orange-300 text-orange-900";
                       rankIcon = <Medal className="h-6 w-6 text-orange-600" />;
                     }
@@ -359,7 +400,6 @@ export default function RoomPage({
           /* ========================================= */
           <>
             {roomState === "WAITING" ? (
-              // WAITING FOR PLAYERS (Shows QR Code)
               <div className="mt-8 grid gap-6 lg:grid-cols-[360px_1fr]">
                 <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
                   <h2 className="text-center font-bold text-slate-800 text-lg mb-4">Join the Game!</h2>
@@ -398,10 +438,8 @@ export default function RoomPage({
                 </div>
               </div>
             ) : (
-              // QUIZ HAS STARTED (QR is Hidden. Question Takes Center Stage)
               <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_380px]">
                 
-                {/* LEFT: CENTER STAGE QUESTION */}
                 <div className="flex flex-col gap-6">
                   {roomState === "QUESTION_ACTIVE" && (
                     <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-5 py-4 shadow-sm">
@@ -479,7 +517,6 @@ export default function RoomPage({
                   )}
                 </div>
 
-                {/* RIGHT: LIVE LEADERBOARD */}
                 <div className="flex flex-col gap-6">
                   <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden flex flex-col max-h-[800px]">
                     <div className="bg-slate-900 px-6 py-4">
