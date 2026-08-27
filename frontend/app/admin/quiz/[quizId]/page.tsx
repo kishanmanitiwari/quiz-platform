@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { Plus, Save, Play, Layers, ArrowLeft } from "lucide-react";
+import { Plus, Save, Play, ArrowLeft, ArrowRight } from "lucide-react";
 
 type Question = {
   order: number;
@@ -22,7 +22,6 @@ type Quiz = {
   title: string;
   totalQuestions?: number;
   questions: Question[];
-  rooms: { id: string; roomCode: string; status: string }[];
 };
 
 const blank = (order: number): Question => ({
@@ -79,8 +78,15 @@ export default function QuizPage({
         method: "PUT",
         body: JSON.stringify(form),
       });
-      setMessage("Question saved successfully!");
+
       await load();
+
+      if (selected < totalQuestions) {
+        setSelected((prev) => prev + 1);
+        setMessage(""); // Clear message when moving to the next tab
+      } else {
+        setMessage("Quiz saved successfully!");
+      }
     } catch (err) {
       setMessage("Failed to save question");
     } finally {
@@ -129,7 +135,7 @@ export default function QuizPage({
             disabled={configuredCount < totalQuestions}
             onClick={createRoom}
           >
-            <Play size={18} /> Create Room
+            <Play size={18} /> Start Quiz Session
           </button>
         </div>
 
@@ -283,38 +289,18 @@ export default function QuizPage({
               onClick={saveQuestion}
               disabled={isSaving}
             >
-              <Save size={18} /> {isSaving ? "Saving..." : "Save Question"}
+              {selected < totalQuestions ? (
+                <>
+                  {isSaving ? "Saving..." : "Next"} <ArrowRight size={18} />
+                </>
+              ) : (
+                <>
+                  <Save size={18} /> {isSaving ? "Saving..." : "Save Quiz"}
+                </>
+              )}
             </button>
           </div>
         </div>
-
-        {/* Existing Rooms List */}
-        {quiz.rooms.length > 0 && (
-          <div className="mt-10">
-            <h2 className="text-xl font-extrabold text-slate-900 mb-4">
-              Active Rooms
-            </h2>
-            <div className="grid gap-3">
-              {quiz.rooms.map((room) => (
-                <Link
-                  key={room.id}
-                  className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-leaf hover:shadow-md"
-                  href={`/admin/room/${room.id}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Layers className="text-slate-400" size={20} />
-                    <span className="font-bold text-slate-900">
-                      Room Code: {room.roomCode}
-                    </span>
-                  </div>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-wider text-slate-700">
-                    {room.status}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
       </section>
     </main>
   );
