@@ -39,11 +39,11 @@ type Result = {
 };
 
 const QUOTES = [
-  "“The highest perfection of human life is to remember Krishna at all times.”",
-  "“One who is devoted to Me, and is free from attachment, fear and anger, is very dear to Me.”",
   "“Always think of Me, become My devotee, worship Me and offer your homage unto Me.”",
   "“There is no truth superior to Me.”",
   "“A person who sees Me in everything and everything in Me is never lost to Me.”",
+  "“One who is devoted to Me is very dear to Me.”",
+  "“The highest perfection of human life is to remember Krishna at all times.”",
 ];
 
 export default function JoinPage({
@@ -72,20 +72,26 @@ export default function JoinPage({
   const [quoteIndex, setQuoteIndex] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
 
-  // Restore participant
+  // ---------------------------------------------------------
+  // RESTORE PARTICIPANT
+  // ---------------------------------------------------------
+
   useEffect(() => {
     const saved = localStorage.getItem(participantKey(roomCode));
 
-    if (saved) {
-      try {
-        setParticipant(JSON.parse(saved));
-      } catch {
-        localStorage.removeItem(participantKey(roomCode));
-      }
+    if (!saved) return;
+
+    try {
+      setParticipant(JSON.parse(saved));
+    } catch {
+      localStorage.removeItem(participantKey(roomCode));
     }
   }, [roomCode]);
 
-  // Socket connection
+  // ---------------------------------------------------------
+  // SOCKET CONNECTION
+  // ---------------------------------------------------------
+
   useEffect(() => {
     if (!participant) return;
 
@@ -102,36 +108,62 @@ export default function JoinPage({
     client.emit(
       "participant:reconnect",
       payload,
-      (ack: { ok: boolean; state?: State; error?: string }) => {
+      (ack: {
+        ok: boolean;
+        state?: State;
+        error?: string;
+      }) => {
         if (ack.ok && ack.state) {
-          setState(ack.state);
+          setState({
+            ...ack.state,
+            alreadyAnswered: false,
+          });
         }
 
         if (!ack.ok) {
           setMessage(ack.error ?? "Reconnect failed");
         }
-      },
+      }
     );
 
-    client.on("room:state", setState);
-    client.on("question:start", setState);
+    client.on("room:state", (newState: State) => {
+      setState(newState);
+    });
+
+    // IMPORTANT:
+    // Explicitly reset alreadyAnswered when a NEW question starts.
+    client.on("question:start", (newState: State) => {
+      setState({
+        ...newState,
+        alreadyAnswered: false,
+      });
+
+      setMessage("");
+
+      // Remove browser focus from the previous answer button.
+      requestAnimationFrame(() => {
+        (document.activeElement as HTMLElement | null)?.blur();
+      });
+    });
 
     client.on("question:end", ({ leaderboard }) => {
-      setMessage(
-        `Leaderboard updated. Top score: ${leaderboard?.[0]?.totalScore ?? 0}`,
-      );
+      // Don't show repetitive "waiting" messages.
+      // The UI itself communicates that the answer is locked.
+      if (leaderboard?.[0]) {
+        // Intentionally no UI message here.
+      }
     });
 
     client.on("quiz:finish", ({ leaderboard }) => {
       const myResult = leaderboard?.find(
-        (x: any) => x.participantId === participant.id,
+        (x: any) => x.participantId === participant.id
       );
 
       setResult({
         rank: myResult?.rank,
         totalScore: myResult?.totalScore,
         correctAnswers: myResult?.correctAnswers,
-        totalQuestions: state?.quiz.questionCount,
+        totalQuestions: undefined,
       });
 
       setMessage("");
@@ -144,8 +176,9 @@ export default function JoinPage({
                 ...current.room,
                 status: "FINISHED",
               },
+              alreadyAnswered: false,
             }
-          : current,
+          : current
       );
 
       // Fetch final result once.
@@ -161,8 +194,7 @@ export default function JoinPage({
           }));
         })
         .catch(() => {
-          // Leaderboard result is already available,
-          // so don't show an error for a secondary request.
+          // Leaderboard data is already available.
         });
     });
 
@@ -173,9 +205,15 @@ export default function JoinPage({
     };
   }, [participant, roomCode]);
 
-  // Question timer only runs while a question is active.
+  // ---------------------------------------------------------
+  // QUESTION TIMER
+  // ---------------------------------------------------------
+
   useEffect(() => {
-    if (!state?.room.questionEndsAt) {
+    if (
+      state?.room.status !== "QUESTION_ACTIVE" ||
+      !state.room.questionEndsAt
+    ) {
       setSecondsLeft(0);
       return;
     }
@@ -185,10 +223,11 @@ export default function JoinPage({
         Math.max(
           0,
           Math.ceil(
-            (new Date(state.room.questionEndsAt!).getTime() - Date.now()) /
-              1000,
-          ),
-        ),
+            (new Date(state.room.questionEndsAt!).getTime() -
+              Date.now()) /
+              1000
+          )
+        )
       );
     };
 
@@ -197,20 +236,34 @@ export default function JoinPage({
     const timer = window.setInterval(updateTimer, 500);
 
     return () => window.clearInterval(timer);
-  }, [state?.room.questionEndsAt]);
+  }, [
+    state?.room.status,
+    state?.room.questionEndsAt,
+  ]);
 
-  // Rotate quotes only while waiting.
+  // ---------------------------------------------------------
+  // WAITING SCREEN QUOTES
+  // ---------------------------------------------------------
+
   useEffect(() => {
-    if (!participant || !state) return;
-    if (state.room.status === "FINISHED") return;
-    if (state.room.status === "QUESTION_ACTIVE") return;
+    if (!state) return;
+
+    const isWaiting =
+      state.room.status !== "QUESTION_ACTIVE" &&
+      state.room.status !== "FINISHED";
+
+    if (!isWaiting) return;
 
     const timer = window.setInterval(() => {
       setQuoteIndex((current) => (current + 1) % QUOTES.length);
     }, 7000);
 
     return () => window.clearInterval(timer);
-  }, [participant, state?.room.status]);
+  }, [state?.room.status]);
+
+  // ---------------------------------------------------------
+  // OPTIONS
+  // ---------------------------------------------------------
 
   const options = useMemo(() => {
     const q = state?.currentQuestion;
@@ -224,6 +277,10 @@ export default function JoinPage({
         ]
       : [];
   }, [state?.currentQuestion]);
+
+  // ---------------------------------------------------------
+  // JOIN
+  // ---------------------------------------------------------
 
   async function join() {
     setMessage("");
@@ -255,11 +312,13 @@ export default function JoinPage({
           errString.includes("p2002")
         ) {
           return setMessage(
-            "You have already joined or played this quiz with this WhatsApp number!",
+            "You have already joined or played this quiz with this WhatsApp number!"
           );
         }
 
-        return setMessage(body.error ?? "Could not join room");
+        return setMessage(
+          body.error ?? "Could not join room"
+        );
       }
 
       const saved = {
@@ -268,17 +327,34 @@ export default function JoinPage({
         sessionId,
       };
 
-      localStorage.setItem(participantKey(roomCode), JSON.stringify(saved));
+      localStorage.setItem(
+        participantKey(roomCode),
+        JSON.stringify(saved)
+      );
 
       setParticipant(saved);
-      setState(body.state);
+      setState({
+        ...body.state,
+        alreadyAnswered: false,
+      });
     } catch {
       setMessage("Network error. Please try again.");
     }
   }
 
+  // ---------------------------------------------------------
+  // ANSWER
+  // ---------------------------------------------------------
+
   function answer(selectedOption: string) {
-    if (!socket || !participant || !state?.currentQuestion) return;
+    if (
+      !socket ||
+      !participant ||
+      !state?.currentQuestion ||
+      state.alreadyAnswered
+    ) {
+      return;
+    }
 
     socket.emit(
       "answer:submit",
@@ -289,24 +365,37 @@ export default function JoinPage({
         questionId: state.currentQuestion.id,
         selectedOption,
       },
-      (ack: { ok: boolean; error?: string }) => {
-        setMessage(
-          ack.ok
-            ? "Answer submitted. Waiting for next question..."
-            : (ack.error ?? "Answer rejected"),
+      (ack: {
+        ok: boolean;
+        error?: string;
+      }) => {
+        if (!ack.ok) {
+          setMessage(
+            ack.error ?? "Answer rejected"
+          );
+          return;
+        }
+
+        // Clear any old message.
+        setMessage("");
+
+        // Lock the current question.
+        setState((current) =>
+          current
+            ? {
+                ...current,
+                alreadyAnswered: true,
+              }
+            : current
         );
 
-        if (ack.ok) {
-          setState((current) =>
-            current
-              ? {
-                  ...current,
-                  alreadyAnswered: true,
-                }
-              : current,
-          );
-        }
-      },
+        // IMPORTANT:
+        // Prevent the clicked button from retaining browser focus
+        // when the next question renders.
+        requestAnimationFrame(() => {
+          (document.activeElement as HTMLElement | null)?.blur();
+        });
+      }
     );
   }
 
@@ -361,14 +450,18 @@ export default function JoinPage({
               className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
               value={phone}
               onChange={(e) =>
-                setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
+                setPhone(
+                  e.target.value
+                    .replace(/\D/g, "")
+                    .slice(0, 10)
+                )
               }
               placeholder="10-digit WhatsApp number"
             />
 
             <p className="mt-2 text-xs font-medium leading-relaxed text-slate-500">
-              Results, gift coupons, and photos for today's event will be shared
-              on this number.
+              Results, gift coupons, and photos for today's
+              event will be shared on this number.
             </p>
           </div>
 
@@ -391,18 +484,25 @@ export default function JoinPage({
                 type="checkbox"
                 className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
                 checked={hasJoinedWa}
-                onChange={(e) => setHasJoinedWa(e.target.checked)}
+                onChange={(e) =>
+                  setHasJoinedWa(e.target.checked)
+                }
               />
 
               <span className="text-sm font-semibold leading-relaxed text-slate-800">
-                Step 2: I confirm I have joined the ISKCON WhatsApp Community.
+                Step 2: I confirm I have joined the ISKCON
+                WhatsApp Community.
               </span>
             </label>
           </div>
 
           <button
             className="focus-ring mt-6 w-full rounded-xl bg-leaf px-4 py-3.5 font-bold text-white shadow-md transition hover:-translate-y-0.5 hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!name.trim() || phone.length !== 10 || !hasJoinedWa}
+            disabled={
+              !name.trim() ||
+              phone.length !== 10 ||
+              !hasJoinedWa
+            }
             onClick={join}
           >
             Enter Quiz →
@@ -410,7 +510,9 @@ export default function JoinPage({
 
           {message && (
             <div className="mt-4 rounded-xl border border-red-100 bg-red-50 p-3 text-center">
-              <p className="text-sm font-semibold text-red-600">{message}</p>
+              <p className="text-sm font-semibold text-red-600">
+                {message}
+              </p>
             </div>
           )}
         </section>
@@ -440,13 +542,20 @@ export default function JoinPage({
   // ACTIVE QUESTION
   // ---------------------------------------------------------
 
-  if (state.room.status === "QUESTION_ACTIVE" && state.currentQuestion) {
+  if (
+    state.room.status === "QUESTION_ACTIVE" &&
+    state.currentQuestion
+  ) {
     return (
       <main className="min-h-screen bg-slate-50 px-4 py-6">
-        <section className="mx-auto max-w-xl">
+        <section
+          key={state.currentQuestion.id}
+          className="mx-auto max-w-xl"
+        >
           <div className="flex items-center justify-between text-sm font-bold text-slate-700">
             <span>
-              Question {state.currentQuestion.order}/{state.quiz.questionCount}
+              Question {state.currentQuestion.order}/
+              {state.quiz.questionCount}
             </span>
 
             <span
@@ -467,10 +576,11 @@ export default function JoinPage({
           <div className="mt-7 grid gap-3">
             {options.map(([key, label]) => (
               <button
-                key={key}
+                key={`${state.currentQuestion!.id}-${key}`}
+                type="button"
                 disabled={state.alreadyAnswered}
                 onClick={() => answer(key)}
-                className="focus-ring rounded-2xl border border-slate-200 bg-white p-5 text-left font-semibold shadow-sm transition hover:-translate-y-0.5 hover:border-leaf hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                className="focus-ring rounded-2xl border border-slate-200 bg-white p-5 text-left font-semibold shadow-sm transition hover:-translate-y-0.5 hover:border-leaf hover:shadow-md focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span className="mr-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-sm font-black text-leaf">
                   {key}
@@ -482,17 +592,19 @@ export default function JoinPage({
           </div>
 
           {state.alreadyAnswered && (
-            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-center">
-              <p className="font-bold text-amber-900">Hari Bol! 🙏</p>
+            <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
+              <p className="font-bold text-emerald-900">
+                Answer locked ✓
+              </p>
 
-              <p className="mt-1 text-sm font-medium text-amber-800">
-                Answer submitted. Kindly wait for the next question...
+              <p className="mt-1 text-sm font-medium text-emerald-800">
+                Get ready for the next question.
               </p>
             </div>
           )}
 
           {message && (
-            <p className="mt-4 text-center text-sm font-semibold text-slate-600">
+            <p className="mt-4 text-center text-sm font-semibold text-red-600">
               {message}
             </p>
           )}
@@ -526,21 +638,23 @@ export default function JoinPage({
             </h1>
 
             <p className="mt-2 text-slate-600">
-              You completed the quiz, {participant.name}.
+              You completed the quiz,{" "}
+              <span className="font-bold text-slate-900">
+                {participant.name}
+              </span>
+              .
             </p>
           </div>
 
           <div className="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
-            <div className="bg-leaf px-6 py-5 text-center text-white">
+            <div className="bg-leaf px-6 py-6 text-center text-white">
               <p className="text-sm font-bold uppercase tracking-widest opacity-80">
-                Your Result
+                Your Score
               </p>
 
-              <div className="mt-2 text-5xl font-black">{score ?? "—"}</div>
-
-              <p className="mt-1 text-sm font-semibold opacity-90">
-                Total Score
-              </p>
+              <div className="mt-2 text-5xl font-black">
+                {score ?? "—"}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 divide-x divide-slate-200">
@@ -572,7 +686,8 @@ export default function JoinPage({
             </p>
 
             <p className="mt-2 text-sm leading-relaxed text-emerald-800">
-              Keep learning, keep serving and keep remembering Krishna.
+              Keep learning, keep serving and keep remembering
+              Krishna.
             </p>
           </div>
 
@@ -601,13 +716,15 @@ export default function JoinPage({
             QuizSession {roomCode}
           </p>
 
-          <h1 className="mt-4 text-3xl font-black tracking-tight text-slate-900">
+          <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-900">
             You're In!
           </h1>
 
           <p className="mt-2 text-slate-600">
             Welcome,{" "}
-            <span className="font-bold text-slate-900">{participant.name}</span>
+            <span className="font-bold text-slate-900">
+              {participant.name}
+            </span>
           </p>
         </div>
 
@@ -643,15 +760,15 @@ export default function JoinPage({
           </div>
         </div>
 
-        {/* Quote */}
+        {/* Rotating quote */}
         <div className="mt-5 rounded-3xl border border-amber-100 bg-amber-50 p-6">
           <p className="text-center text-xs font-bold uppercase tracking-widest text-amber-700">
-            Krishna Conscious Thought
+            Krishna-Conscious Thought
           </p>
 
           <p
             key={quoteIndex}
-            className="mt-4 text-center text-base font-semibold leading-relaxed text-amber-950"
+            className="mt-4 min-h-[72px] text-center text-base font-semibold leading-relaxed text-amber-950"
           >
             {QUOTES[quoteIndex]}
           </p>
@@ -670,29 +787,8 @@ export default function JoinPage({
           </div>
         </div>
 
-        {/* Quiz info */}
-        <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-slate-500">Quiz</span>
-
-            <span className="text-sm font-bold text-slate-900">
-              {state.quiz.title}
-            </span>
-          </div>
-
-          <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
-            <span className="text-sm font-semibold text-slate-500">
-              Questions
-            </span>
-
-            <span className="text-sm font-bold text-slate-900">
-              {state.quiz.questionCount}
-            </span>
-          </div>
-        </div>
-
         {message && (
-          <p className="mt-4 text-center text-sm font-semibold text-slate-600">
+          <p className="mt-4 text-center text-sm font-semibold text-red-600">
             {message}
           </p>
         )}
