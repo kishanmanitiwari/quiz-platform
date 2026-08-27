@@ -61,7 +61,7 @@ export default function JoinPage({
   const [gender, setGender] = useState("");
   const [hasJoinedWa, setHasJoinedWa] = useState(false);
   const [communityCode, setCommunityCode] = useState("");
-  
+
   // 3. State to track if the 2-hour token/cookie is active
   const [isOnCooldown, setIsOnCooldown] = useState(false);
 
@@ -123,29 +123,34 @@ export default function JoinPage({
       sessionId: participant.sessionId,
     };
 
-    client.emit(
-      "participant:reconnect",
-      payload,
-      (ack: {
-        ok: boolean;
-        state?: State;
-        error?: string;
-      }) => {
-        if (ack.ok && ack.state) {
-          setState({
-            ...ack.state,
-            alreadyAnswered: false,
-          });
-        }
+    // FIX 1: Ask for state on initial connect AND any auto-reconnects
+    client.on("connect", () => {
+      client.emit(
+        "participant:reconnect",
+        payload,
+        (ack: { ok: boolean; state?: State; error?: string }) => {
+          if (ack.ok && ack.state) {
+            setState((current) => ({
+              ...ack.state,
+              // Preserve the answer lock if they reconnected mid-question
+              alreadyAnswered: current?.alreadyAnswered ?? false,
+            }));
+          }
 
-        if (!ack.ok) {
-          setMessage(ack.error ?? "Reconnect failed");
-        }
-      }
-    );
+          if (!ack.ok) {
+            setMessage(ack.error ?? "Reconnect failed");
+          }
+        },
+      );
+    });
 
     client.on("room:state", (newState: State) => {
-      setState(newState);
+      // FIX 2: Prevent participant count updates from accidentally unlocking the buttons
+      setState((current) =>
+        current
+          ? { ...newState, alreadyAnswered: current.alreadyAnswered }
+          : { ...newState, alreadyAnswered: false },
+      );
     });
 
     client.on("question:start", (newState: State) => {
@@ -160,8 +165,11 @@ export default function JoinPage({
       });
     });
 
-    client.on("question:end", ({ leaderboard }) => {
-      if (leaderboard?.[0]) {}
+    client.on("question:end", () => {
+      // FIX 3: Explicitly lock the UI the moment the server says time is up
+      setState((current) =>
+        current ? { ...current, alreadyAnswered: true } : current,
+      );
     });
 
     client.on("quiz:finish", ({ leaderboard }) => {
@@ -172,7 +180,7 @@ export default function JoinPage({
       setIsOnCooldown(true);
 
       const myResult = leaderboard?.find(
-        (x: any) => x.participantId === participant.id
+        (x: any) => x.participantId === participant.id,
       );
 
       setResult({
@@ -194,7 +202,7 @@ export default function JoinPage({
               },
               alreadyAnswered: false,
             }
-          : current
+          : current,
       );
 
       fetch(`${API_URL}/api/participants/${participant.id}/result`)
@@ -234,11 +242,10 @@ export default function JoinPage({
         Math.max(
           0,
           Math.ceil(
-            (new Date(state.room.questionEndsAt!).getTime() -
-              Date.now()) /
-              1000
-          )
-        )
+            (new Date(state.room.questionEndsAt!).getTime() - Date.now()) /
+              1000,
+          ),
+        ),
       );
     };
 
@@ -303,9 +310,9 @@ export default function JoinPage({
           roomCode,
           name,
           phone,
-          age: Number(age),         // Added age
-          gender,                   // Added gender
-          communityCode,            // Added unique code
+          age: Number(age), // Added age
+          gender, // Added gender
+          communityCode, // Added unique code
           sessionId,
         }),
       });
@@ -321,7 +328,7 @@ export default function JoinPage({
           errString.includes("p2002")
         ) {
           return setMessage(
-            "You have already joined or played this quiz with this WhatsApp number!"
+            "You have already joined or played this quiz with this WhatsApp number!",
           );
         }
 
@@ -334,10 +341,7 @@ export default function JoinPage({
         sessionId,
       };
 
-      localStorage.setItem(
-        participantKey(roomCode),
-        JSON.stringify(saved)
-      );
+      localStorage.setItem(participantKey(roomCode), JSON.stringify(saved));
 
       setParticipant(saved);
       setState({
@@ -385,13 +389,13 @@ export default function JoinPage({
                 ...current,
                 alreadyAnswered: true,
               }
-            : current
+            : current,
         );
 
         requestAnimationFrame(() => {
           (document.activeElement as HTMLElement | null)?.blur();
         });
-      }
+      },
     );
   }
 
@@ -449,7 +453,9 @@ export default function JoinPage({
 
           <div className="mt-5 grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-bold text-slate-800">Age</label>
+              <label className="block text-sm font-bold text-slate-800">
+                Age
+              </label>
               <input
                 type="number"
                 className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
@@ -461,13 +467,17 @@ export default function JoinPage({
               />
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-800">Gender</label>
+              <label className="block text-sm font-bold text-slate-800">
+                Gender
+              </label>
               <select
                 className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
                 value={gender}
                 onChange={(e) => setGender(e.target.value)}
               >
-                <option value="" disabled>Select</option>
+                <option value="" disabled>
+                  Select
+                </option>
                 <option value="Male">Male</option>
                 <option value="Female">Female</option>
                 <option value="Other">Other</option>
@@ -523,7 +533,8 @@ export default function JoinPage({
             <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-center shadow-sm">
               <p className="font-bold text-amber-900">Cooldown Active ⏳</p>
               <p className="mt-1 text-sm font-medium text-amber-800">
-                You have already completed the quiz. Please wait 2 hours before playing again.
+                You have already completed the quiz. Please wait 2 hours before
+                playing again.
               </p>
             </div>
           ) : (
@@ -602,7 +613,12 @@ export default function JoinPage({
               <button
                 key={`${state.currentQuestion!.id}-${key}`}
                 type="button"
-                disabled={state.alreadyAnswered}
+                // FIX 4: Hard-lock the button if time hits 0 or room status isn't active
+                disabled={
+                  state.alreadyAnswered ||
+                  secondsLeft === 0 ||
+                  state.room.status !== "QUESTION_ACTIVE"
+                }
                 onClick={() => answer(key)}
                 className="focus-ring rounded-2xl border border-slate-200 bg-white p-5 text-left font-semibold shadow-sm transition hover:-translate-y-0.5 hover:border-leaf hover:shadow-md focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
               >
@@ -728,9 +744,7 @@ export default function JoinPage({
           </h1>
           <p className="mt-2 text-slate-600">
             Welcome,{" "}
-            <span className="font-bold text-slate-900">
-              {participant.name}
-            </span>
+            <span className="font-bold text-slate-900">{participant.name}</span>
           </p>
         </div>
 
