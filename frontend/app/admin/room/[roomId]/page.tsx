@@ -72,7 +72,6 @@ export default function RoomPage({
   const [message, setMessage] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
 
-  // NEW: UI Safety Locks
   const [isEmitting, setIsEmitting] = useState(false);
   const hasAutoEndedRef = useRef(false);
 
@@ -81,9 +80,15 @@ export default function RoomPage({
     return `${window.location.origin}/join/${data.room.roomCode}`;
   }, [data]);
 
+  // FIX 3: Safe load() function that doesn't crash if internet drops
   async function load() {
-    const body = await apiFetch<RoomPayload>(`/api/admin/rooms/${roomId}`);
-    setData(body);
+    try {
+      const body = await apiFetch<RoomPayload>(`/api/admin/rooms/${roomId}`);
+      setData(body);
+      setMessage((prev) => (prev.includes("offline") ? "" : prev)); // Clear offline warning if successful
+    } catch (error) {
+      console.warn("Network offline. Keeping current state in UI.");
+    }
   }
 
   useEffect(() => {
@@ -96,24 +101,36 @@ export default function RoomPage({
   }, [data, joinUrl]);
 
   useEffect(() => {
+    // FIX 1: Explicit infinite auto-reconnect config with token
     const client = io(SOCKET_URL, {
       transports: ["websocket"],
       auth: { token: localStorage.getItem("admin_token") },
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
     });
 
-    // Handle internet reconnects
     const joinRoom = () => {
       client.emit(
         "admin:join",
         { roomId },
         (ack: { ok: boolean; state?: PublicState; error?: string }) => {
-          if (ack.ok && ack.state) setState(ack.state);
+          if (ack.ok && ack.state) {
+            setState(ack.state);
+            setMessage(""); // Clear any disconnect messages
+          }
           if (!ack.ok) setMessage(ack.error ?? "Socket join failed");
         },
       );
     };
 
     client.on("connect", joinRoom);
+    
+    // Warn admin if socket disconnects (e.g. bad internet)
+    client.on("disconnect", () => {
+      setMessage("⚠️ You are currently offline. Attempting to reconnect...");
+    });
+
     client.on("room:state", setState);
     client.on("question:start", setState);
     client.on("leaderboard:update", (leaderboard) =>
@@ -139,13 +156,19 @@ export default function RoomPage({
     };
   }, [roomId]);
 
-  // NEW: Emit function with double-click protection
   function emit(name: string) {
-    if (isEmitting) return; // Prevent double clicks
+    if (isEmitting) return;
+
+    // FIX 2: Prevent getting stuck in a loading state if admin clicks while offline
+    if (socket && !socket.connected) {
+      setMessage("⚠️ Cannot perform action while offline. Wait for reconnect.");
+      return;
+    }
+
     setIsEmitting(true);
 
     socket?.emit(name, { roomId }, (ack: { ok: boolean; error?: string }) => {
-      setIsEmitting(false); // Unlock the buttons
+      setIsEmitting(false);
       setMessage(ack.ok ? "" : (ack.error ?? "Action failed"));
       void load();
     });
@@ -171,7 +194,7 @@ export default function RoomPage({
   const questionEndsAt =
     state?.room.questionEndsAt ?? data?.room.questionEndsAt;
 
-  // Auto-End Hook: Automatically fires when the clock hits exactly 0
+  // Auto-End Hook
   useEffect(() => {
     if (roomState === "QUESTION_ACTIVE" && secondsLeft > 0) {
       hasAutoEndedRef.current = false;
@@ -200,6 +223,12 @@ export default function RoomPage({
       return;
 
     if (isEmitting) return;
+
+    if (socket && !socket.connected) {
+      setMessage("⚠️ Cannot perform action while offline. Wait for reconnect.");
+      return;
+    }
+
     setIsEmitting(true);
 
     socket?.emit(
@@ -379,7 +408,9 @@ export default function RoomPage({
         </div>
 
         {message && (
-          <p className="mt-4 text-sm font-semibold text-red-600">{message}</p>
+          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+            <p className="text-sm font-semibold text-amber-900">{message}</p>
+          </div>
         )}
 
         {roomState === "FINISHED" ? (
