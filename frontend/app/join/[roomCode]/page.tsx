@@ -140,7 +140,6 @@ export default function JoinPage({
       const body = await res.json();
 
       if (!res.ok) {
-        // Catch duplicate Prisma error strings or custom backend messages
         const errString = String(body.error || "").toLowerCase();
         if (
           errString.includes("unique") ||
@@ -195,125 +194,152 @@ export default function JoinPage({
   // --- JOIN SCREEN (Unregistered User) ---
   if (!participant) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-8">
-        <section className="mx-auto max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-sm font-semibold uppercase tracking-wide text-leaf">
-            QuizSession {roomCode}
-          </p>
-          <h1 className="mt-2 text-3xl font-bold">ISKCON Event Quiz</h1>
-
-          <div className="mt-8">
-            <label className="block text-sm font-semibold text-slate-800">
-              Your Name
-            </label>
-            <input
-              className="focus-ring mt-2 w-full rounded-md border border-slate-300 bg-white px-4 py-3"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={40}
-              placeholder="Enter your full name"
-            />
-          </div>
-
-          <div className="mt-5">
-            <label className="block text-sm font-semibold text-slate-800">
-              WhatsApp Number
-            </label>
-            <input
-              type="tel"
-              className="focus-ring mt-2 w-full rounded-md border border-slate-300 bg-white px-4 py-3"
-              value={phone}
-              onChange={(e) =>
-                setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
-              }
-              placeholder="10-digit WhatsApp number"
-            />
-            <p className="mt-2 text-xs font-medium text-slate-500">
-              * Results, gift coupons, and photos for today's event will be
-              shared on this number.
+      <main className="min-h-screen bg-[#FFF9F2] px-4 py-8 flex flex-col items-center justify-center">
+        <section className="w-full max-w-md rounded-2xl border border-orange-100 bg-white p-8 shadow-xl shadow-orange-100/50">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-extrabold text-orange-600 mb-2">
+              Hare Krishna! 🙏
+            </h1>
+            <p className="text-sm font-bold uppercase tracking-wider text-orange-400">
+              ISKCON Event Quiz • Room {roomCode}
             </p>
           </div>
 
-          <div className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 p-4">
-            <p className="mb-3 text-center text-sm font-semibold text-emerald-900">
-              Mandatory: Join our community to play
-            </p>
-            <a
-              href="https://chat.whatsapp.com/YOUR_INVITE_LINK_HERE"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-emerald-600 px-4 py-3 font-bold text-white shadow-sm transition-opacity hover:opacity-90"
-            >
-              💬 Step 1: Join WhatsApp Group
-            </a>
-
-            <label className="mt-4 flex cursor-pointer items-start gap-3">
+          <div className="space-y-6">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                Your Good Name
+              </label>
               <input
-                type="checkbox"
-                className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
-                checked={hasJoinedWa}
-                onChange={(e) => setHasJoinedWa(e.target.checked)}
+                className="w-full rounded-xl border border-orange-200 bg-orange-50/30 px-4 py-3 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20 transition-all"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={40}
+                placeholder="Enter your full name"
               />
-              <span className="text-sm font-semibold text-slate-800">
-                Step 2: I confirm I have joined the ISKCON WhatsApp Community.
-              </span>
-            </label>
-          </div>
-
-          <button
-            className="focus-ring mt-6 w-full rounded-md bg-leaf px-4 py-3 font-bold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!name.trim() || phone.length !== 10 || !hasJoinedWa}
-            onClick={join}
-          >
-            Enter Quiz
-          </button>
-
-          {message && (
-            <div className="mt-4 rounded-md bg-red-50 p-3 text-center border border-red-100">
-              <p className="text-sm font-semibold text-red-600">{message}</p>
             </div>
-          )}
+
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                WhatsApp Number
+              </label>
+              <input
+                type="tel"
+                className="w-full rounded-xl border border-orange-200 bg-orange-50/30 px-4 py-3 focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20 transition-all"
+                value={phone}
+                onChange={(e) =>
+                  setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
+                }
+                placeholder="10-digit WhatsApp number"
+              />
+              <p className="mt-2 text-xs font-medium text-orange-600/80">
+                * Results, prasadam coupons, and memories will be shared here.
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
+              <p className="mb-4 text-center text-sm font-semibold text-emerald-900">
+                Join our spiritual community to participate
+              </p>
+              <a
+                href="https://chat.whatsapp.com/YOUR_INVITE_LINK_HERE"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white shadow-md shadow-emerald-600/20 transition-all hover:bg-emerald-700 hover:shadow-lg"
+              >
+                💬 Step 1: Join WhatsApp Group
+              </a>
+
+              <label className="mt-5 flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-5 w-5 shrink-0 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-600"
+                  checked={hasJoinedWa}
+                  onChange={(e) => setHasJoinedWa(e.target.checked)}
+                />
+                <span className="text-sm font-semibold text-emerald-900">
+                  Step 2: I confirm I have joined the ISKCON WhatsApp Community.
+                </span>
+              </label>
+            </div>
+
+            <button
+              className="mt-6 w-full rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 px-4 py-4 font-bold text-white shadow-lg shadow-orange-500/30 transition-all hover:opacity-90 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+              disabled={!name.trim() || phone.length !== 10 || !hasJoinedWa}
+              onClick={join}
+            >
+              Enter Quiz
+            </button>
+
+            {message && (
+              <div className="mt-4 rounded-xl bg-red-50 p-4 text-center border border-red-100">
+                <p className="text-sm font-semibold text-red-600">{message}</p>
+              </div>
+            )}
+          </div>
         </section>
       </main>
     );
   }
 
   // --- LOADING SCREEN ---
-  if (!state) return <main className="p-6">Connecting...</main>;
+  if (!state)
+    return (
+      <main className="min-h-screen bg-[#FFF9F2] flex items-center justify-center">
+        <p className="text-lg font-semibold text-orange-600 animate-pulse">
+          Connecting... 🙏
+        </p>
+      </main>
+    );
 
   // --- ACTIVE QUESTION SCREEN ---
   if (state.room.status === "QUESTION_ACTIVE" && state.currentQuestion) {
     return (
-      <main className="min-h-screen px-4 py-6">
+      <main className="min-h-screen bg-[#FFF9F2] px-4 py-8">
         <section className="mx-auto max-w-xl">
-          <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
-            <span>
+          <div className="flex items-center justify-between rounded-xl bg-white p-4 shadow-sm border border-orange-100 mb-6">
+            <span className="text-sm font-bold uppercase text-orange-500 tracking-wider">
               Question {state.currentQuestion.order}/{state.quiz.questionCount}
             </span>
-            <span>{secondsLeft}s</span>
+            <span className="flex items-center justify-center bg-orange-100 text-orange-700 px-4 py-1.5 rounded-full font-bold">
+              ⏱ {secondsLeft}s
+            </span>
           </div>
-          <h1 className="mt-5 text-2xl font-bold">
-            {state.currentQuestion.text}
-          </h1>
-          <div className="mt-6 grid gap-3">
+
+          <div className="rounded-2xl bg-white p-6 md:p-8 shadow-md border border-orange-100">
+            <h1 className="text-2xl md:text-3xl font-bold text-slate-800 leading-snug">
+              {state.currentQuestion.text}
+            </h1>
+          </div>
+
+          <div className="mt-6 grid gap-4">
             {options.map(([key, label]) => (
               <button
                 key={key}
                 disabled={state.alreadyAnswered}
                 onClick={() => answer(key)}
-                className="focus-ring rounded-md border border-slate-300 bg-white p-4 text-left font-semibold transition-colors hover:bg-slate-50 disabled:opacity-60"
+                className="group relative flex w-full items-center rounded-xl border-2 border-orange-100 bg-white p-5 text-left font-semibold text-slate-700 transition-all hover:border-orange-400 hover:bg-orange-50 disabled:opacity-60 disabled:hover:border-orange-100 disabled:hover:bg-white"
               >
-                <span className="mr-2 text-leaf">{key}.</span>
-                {label}
+                <span className="mr-4 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-100 text-orange-600 font-bold group-hover:bg-orange-500 group-hover:text-white transition-colors">
+                  {key}
+                </span>
+                <span className="text-lg">{label}</span>
               </button>
             ))}
           </div>
+
           {state.alreadyAnswered && (
-            <p className="mt-5 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
-              Answer submitted. Waiting for next question...
+            <div className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-center">
+              <p className="font-semibold text-emerald-800">
+                Hari Bol! Answer submitted. Waiting for the next question...
+              </p>
+            </div>
+          )}
+          {message && !state.alreadyAnswered && (
+            <p className="mt-6 text-center text-sm font-medium text-slate-600">
+              {message}
             </p>
           )}
-          {message && <p className="mt-4 text-sm text-slate-700">{message}</p>}
         </section>
       </main>
     );
@@ -321,26 +347,48 @@ export default function JoinPage({
 
   // --- WAITING / FINISHED SCREEN ---
   return (
-    <main className="min-h-screen px-4 py-8">
-      <section className="mx-auto max-w-md">
-        <p className="text-sm font-semibold uppercase tracking-wide text-leaf">
-          {participant.name}
+    <main className="min-h-screen bg-[#FFF9F2] px-4 py-12 flex flex-col items-center">
+      <section className="w-full max-w-lg text-center">
+        <p className="text-sm font-bold uppercase tracking-widest text-orange-400 mb-2">
+          Participant: {participant.name}
         </p>
-        <h1 className="mt-2 text-3xl font-bold">{state.quiz.title}</h1>
-        <div className="mt-8 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-lg font-semibold text-slate-900">
-            QuizSession {roomCode}
-          </p>
-          <p className="mt-2 font-medium text-slate-700">
-            {state.room.status === "FINISHED"
-              ? "Quiz finished! Check the big screen for the final results."
-              : "Waiting for the quiz to start..."}
-          </p>
-          <p className="mt-4 inline-block rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-leaf">
-            {state.room.participantCount} participants joined
-          </p>
+        <h1 className="text-3xl md:text-4xl font-extrabold text-slate-800">
+          {state.quiz.title}
+        </h1>
+
+        <div className="mt-10 rounded-3xl border border-orange-100 bg-white p-8 shadow-xl shadow-orange-100/50">
+          {state.room.status === "FINISHED" ? (
+            <>
+              <h2 className="text-4xl mb-4 text-orange-500">🙏</h2>
+              <h2 className="text-2xl font-bold text-orange-600 mb-3">
+                Dhanyawaad!
+              </h2>
+              <p className="text-lg font-medium text-slate-600">
+                Haribol! The quiz has successfully concluded. Please look at the
+                main screen for the final results.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="mx-auto w-12 h-12 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mb-6"></div>
+              <h2 className="text-xl font-bold text-slate-800 mb-2">
+                Room {roomCode}
+              </h2>
+              <p className="text-md font-medium text-slate-600">
+                Please wait patiently. The transcendental quiz will begin
+                shortly...
+              </p>
+            </>
+          )}
+
+          <div className="mt-8 inline-block rounded-full bg-orange-50 border border-orange-100 px-5 py-2 text-sm font-bold text-orange-600">
+            👥 {state.room.participantCount} Devotees Joined
+          </div>
         </div>
-        {message && <p className="mt-4 text-sm text-slate-700">{message}</p>}
+
+        {message && (
+          <p className="mt-6 text-sm font-medium text-slate-600">{message}</p>
+        )}
       </section>
     </main>
   );
