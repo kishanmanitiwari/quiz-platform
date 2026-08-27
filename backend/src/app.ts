@@ -124,7 +124,18 @@ app.put(
 
     const question = await prisma.question.upsert({
       where: { quizId_order: { quizId: quiz.id, order: parsed.data.order } },
-      create: { quizId: quiz.id, ...parsed.data },
+      create: {
+        quizId: quiz.id,
+        order: parsed.data.order,
+        text: parsed.data.text,
+        optionA: parsed.data.optionA,
+        optionB: parsed.data.optionB,
+        optionC: parsed.data.optionC,
+        optionD: parsed.data.optionD,
+        correctOption: parsed.data.correctOption,
+        timeLimit: parsed.data.timeLimit,
+        basePoints: parsed.data.basePoints,
+      },
       update: parsed.data,
     });
     res.json({ question });
@@ -138,11 +149,11 @@ app.post(
     const parsed = createRoomSchema.safeParse(req.body);
     if (!parsed.success)
       return res.status(400).json({ error: parsed.error.flatten() });
-      
+
     const questionCount = await prisma.question.count({
       where: { quizId: parsed.data.quizId },
     });
-    
+
     // UPDATED: Now allows your frontend 6 to 50 question selector
     if (questionCount < 6 || questionCount > 50)
       return res
@@ -154,15 +165,15 @@ app.post(
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     await prisma.room.deleteMany({
       where: {
-        createdAt: { lt: yesterday }
-      }
+        createdAt: { lt: yesterday },
+      },
     });
 
     // Create the new room
     const room = await prisma.room.create({
       data: { quizId: parsed.data.quizId, roomCode: nanoid(6).toUpperCase() },
     });
-    
+
     res.status(201).json({ room });
   }),
 );

@@ -11,5 +11,6 @@
     "strictNullChecks": false,
     "resolveJsonModule": true
   },
-  "include": ["src", "prisma", "scripts", "tests"]
+  "include": ["src", "prisma"],
+  "exclude": ["scripts", "tests"]
 }

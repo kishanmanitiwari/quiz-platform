@@ -11,7 +11,7 @@ export const createQuizSchema = z.object({
 });
 
 export const upsertQuestionSchema = z.object({
-  order: z.number().int().min(1).max(6),
+  order: z.number().int().min(1).max(50),
   text: z.string().trim().min(1).max(500),
   optionA: z.string().trim().min(1).max(200),
   optionB: z.string().trim().min(1).max(200),
