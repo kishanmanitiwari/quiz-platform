@@ -500,7 +500,7 @@ export default function RoomPage({
         {roomState === "FINISHED" ? (
           <div className="mt-12 text-center">
             {/* CSV Download Button */}
-            <div className="mb-8 flex justify-center">
+            {/* <div className="mb-8 flex justify-center">
               <button
                 onClick={downloadCSV}
                 disabled={isEmitting}
@@ -513,7 +513,7 @@ export default function RoomPage({
                 )}
                 Download Event Data (CSV)
               </button>
-            </div>
+            </div> */}
 
             {winner ? (
               <div className="relative mx-auto mb-12 max-w-4xl overflow-hidden rounded-[2rem] bg-gradient-to-br from-amber-400 via-yellow-400 to-orange-500 p-16 shadow-[0_10px_50px_rgba(251,191,36,0.4)] border-4 border-yellow-200">
