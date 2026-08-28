@@ -11,6 +11,7 @@ import {
   Loader2,
   Trophy,
   Medal,
+  Download,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { SOCKET_URL, API_URL } from "@/lib/config";
@@ -114,7 +115,6 @@ export default function RoomPage({
         { roomId },
         (ack: { ok: boolean; state?: PublicState; error?: string }) => {
           if (ack.ok && ack.state) {
-            // FIX: Explicitly cast to PublicState to satisfy TypeScript / Vercel build
             const incomingState = ack.state as PublicState;
             setState(incomingState);
             setMessage("");
@@ -158,18 +158,29 @@ export default function RoomPage({
   function emit(name: string) {
     if (isEmitting) return;
 
-    if (socket && !socket.connected) {
+    if (!socket || !socket.connected) {
       setMessage("⚠️ Cannot perform action while offline. Wait for reconnect.");
       return;
     }
 
     setIsEmitting(true);
 
-    socket?.emit(name, { roomId }, (ack: { ok: boolean; error?: string }) => {
-      setIsEmitting(false);
-      setMessage(ack.ok ? "" : (ack.error ?? "Action failed"));
-      void load();
-    });
+    // FIX: Add 5000ms timeout to emit
+    socket.timeout(5000).emit(
+      name, 
+      { roomId }, 
+      (err: Error | null, ack: { ok: boolean; error?: string }) => {
+        setIsEmitting(false);
+        
+        if (err) {
+          setMessage("⚠️ Network timeout. Please check your connection and try again.");
+          return;
+        }
+
+        setMessage(ack.ok ? "" : (ack.error ?? "Action failed"));
+        void load();
+      }
+    );
   }
 
   useEffect(() => {
@@ -220,22 +231,32 @@ export default function RoomPage({
 
     if (isEmitting) return;
 
-    if (socket && !socket.connected) {
+    if (!socket || !socket.connected) {
       setMessage("⚠️ Cannot perform action while offline. Wait for reconnect.");
       return;
     }
 
     setIsEmitting(true);
 
-    socket?.emit(
+    // FIX: Add 5000ms timeout to finish
+    socket.timeout(5000).emit(
       "quiz:finish",
       { roomId },
-      (ack: {
-        ok: boolean;
-        error?: string;
-        leaderboard?: RoomPayload["leaderboard"];
-      }) => {
+      (
+        err: Error | null,
+        ack: {
+          ok: boolean;
+          error?: string;
+          leaderboard?: RoomPayload["leaderboard"];
+        }
+      ) => {
         setIsEmitting(false);
+        
+        if (err) {
+          setMessage("⚠️ Network timeout. Please check your connection and try again.");
+          return;
+        }
+
         setMessage(ack.ok ? "" : (ack.error ?? "Finish failed"));
         const leaderboard = ack.leaderboard;
         if (leaderboard)
@@ -245,6 +266,41 @@ export default function RoomPage({
         void load();
       },
     );
+  }
+
+  // CSV Download Logic
+  async function downloadCSV() {
+    if (isEmitting) return;
+    setIsEmitting(true);
+    setMessage("Preparing CSV...");
+    
+    try {
+      const token = localStorage.getItem("admin_token");
+      const res = await fetch(`${API_URL}/api/admin/rooms/${roomId}/export`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) throw new Error("Export failed");
+
+      const blob = await res.blob();
+      
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `iskcon-quiz-${data?.room.roomCode}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setMessage("");
+    } catch (error) {
+      setMessage("Failed to download CSV.");
+    } finally {
+      setIsEmitting(false);
+    }
   }
 
   const getStatusBadge = (status: string) => {
@@ -413,6 +469,19 @@ export default function RoomPage({
 
         {roomState === "FINISHED" ? (
           <div className="mt-12 text-center">
+            
+            {/* CSV Download Button */}
+            <div className="mb-8 flex justify-center">
+              <button
+                onClick={downloadCSV}
+                disabled={isEmitting}
+                className="focus-ring inline-flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-4 font-bold text-white shadow-md transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50"
+              >
+                {isEmitting ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />}
+                Download Event Data (CSV)
+              </button>
+            </div>
+
             {winner ? (
               <div className="relative mx-auto mb-12 max-w-4xl overflow-hidden rounded-[2rem] bg-gradient-to-br from-amber-400 via-yellow-400 to-orange-500 p-16 shadow-[0_10px_50px_rgba(251,191,36,0.4)] border-4 border-yellow-200">
                 <div className="absolute left-8 top-8 animate-bounce text-7xl opacity-90 drop-shadow-md">
