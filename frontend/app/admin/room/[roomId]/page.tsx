@@ -660,22 +660,24 @@ export default function RoomPage({
                           </p>
                         </div>
 
-                        {secondsLeft > 0 && (
-                          <div
-                            className={`flex shrink-0 flex-col items-center justify-center rounded-2xl px-6 py-4 transition-all duration-300 ${
-                              secondsLeft <= 5
-                                ? "bg-red-600 text-white animate-pulse shadow-[0_0_20px_rgba(220,38,38,0.6)] scale-105"
-                                : "bg-slate-900 text-white"
-                            }`}
-                          >
-                            <span className="text-xs font-bold uppercase tracking-widest opacity-80">
-                              Time Left
-                            </span>
-                            <span className="mt-1 font-mono text-5xl font-black tabular-nums leading-none">
-                              {secondsLeft}
-                            </span>
-                          </div>
-                        )}
+                        {secondsLeft > 0 &&
+                          !isEmitting &&
+                          roomState === "QUESTION_ACTIVE" && (
+                            <div
+                              className={`flex shrink-0 flex-col items-center justify-center rounded-2xl px-6 py-4 transition-all duration-300 ${
+                                secondsLeft <= 5
+                                  ? "bg-red-600 text-white animate-pulse shadow-[0_0_20px_rgba(220,38,38,0.6)] scale-105"
+                                  : "bg-slate-900 text-white"
+                              }`}
+                            >
+                              <span className="text-xs font-bold uppercase tracking-widest opacity-80">
+                                Time Left
+                              </span>
+                              <span className="mt-1 font-mono text-5xl font-black tabular-nums leading-none">
+                                {secondsLeft}
+                              </span>
+                            </div>
+                          )}
                       </div>
 
                       {currentQuestion && (
