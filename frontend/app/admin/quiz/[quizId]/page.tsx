@@ -105,7 +105,7 @@ export default function QuizPage({
   if (!quiz)
     return (
       <main className="flex min-h-screen items-center justify-center gap-3 p-6">
-        <div className="h-6 w-6 animate-spin rounded-full border-3 border-slate-200 border-t-slate-600" />
+        <div className="h-6 w-6 animate-spin rounded-full border-4 border-slate-200 border-t-slate-600" />
         <span className="font-medium text-slate-500">
           Loading quiz details...
         </span>
