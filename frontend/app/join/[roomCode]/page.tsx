@@ -100,7 +100,6 @@ export default function JoinPage({
   useEffect(() => {
     if (!participant) return;
 
-    // Added identical robust network settings as the admin page
     const client = io(SOCKET_URL, {
       transports: ["websocket"],
       reconnection: true,
@@ -126,13 +125,15 @@ export default function JoinPage({
             const incomingState = ack.state as State;
 
             setState((current) => {
-              // FIX: Only keep alreadyAnswered as true if we are still on the EXACT same question
               const isSameQuestion =
-                current?.currentQuestion?.id === incomingState.currentQuestion?.id;
-                
+                current?.currentQuestion?.id ===
+                incomingState.currentQuestion?.id;
+
               return {
                 ...incomingState,
-                alreadyAnswered: isSameQuestion ? (current?.alreadyAnswered ?? false) : false,
+                alreadyAnswered: isSameQuestion
+                  ? (current?.alreadyAnswered ?? false)
+                  : false,
               };
             });
           }
@@ -152,7 +153,6 @@ export default function JoinPage({
       setMessage("⚠️ Network lost. Waiting for connection...");
     });
 
-    // Auto-recovery for mobile devices waking up / network returning
     const handleOnline = () => {
       if (client.disconnected) {
         setMessage("🌐 Network restored! Joining...");
@@ -163,13 +163,14 @@ export default function JoinPage({
 
     client.on("room:state", (newState: State) => {
       setState((current) => {
-        // FIX: Also check here in case a state broadcast happens right after a drop
         const isSameQuestion =
           current?.currentQuestion?.id === newState.currentQuestion?.id;
-          
+
         return {
           ...newState,
-          alreadyAnswered: isSameQuestion ? (current?.alreadyAnswered ?? false) : false,
+          alreadyAnswered: isSameQuestion
+            ? (current?.alreadyAnswered ?? false)
+            : false,
         };
       });
     });
@@ -569,7 +570,13 @@ export default function JoinPage({
     );
   }
 
-  if (state.room.status === "QUESTION_ACTIVE" && state.currentQuestion) {
+  // FIX: Added QUESTION_ENDED and WAITING_FOR_NEXT so the question screen stays visible
+  if (
+    (state.room.status === "QUESTION_ACTIVE" ||
+      state.room.status === "QUESTION_ENDED" ||
+      state.room.status === "WAITING_FOR_NEXT") &&
+    state.currentQuestion
+  ) {
     return (
       <main className="min-h-screen bg-slate-50 px-4 py-6">
         <section key={state.currentQuestion.id} className="mx-auto max-w-xl">
@@ -613,14 +620,22 @@ export default function JoinPage({
             ))}
           </div>
 
-          {state.alreadyAnswered && (
+          {/* FIX: Shows friendly "Time's up!" fallback if they reconnect after a question ends */}
+          {state.alreadyAnswered ? (
             <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
               <p className="font-bold text-emerald-900">Answer locked ✓</p>
               <p className="mt-1 text-sm font-medium text-emerald-800">
                 Get ready for the next question.
               </p>
             </div>
-          )}
+          ) : state.room.status !== "QUESTION_ACTIVE" ? (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-center">
+              <p className="font-bold text-amber-900">Time's up! ⏳</p>
+              <p className="mt-1 text-sm font-medium text-amber-800">
+                Waiting for the next question to begin.
+              </p>
+            </div>
+          ) : null}
 
           {message && (
             <p className="mt-4 text-center text-sm font-semibold text-red-600">
@@ -727,11 +742,17 @@ export default function JoinPage({
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50">
             <span className="text-3xl">🙏</span>
           </div>
+
+          {/* FIX: Improved fallback messaging based on room state */}
           <h2 className="mt-4 text-xl font-black text-slate-900">
-            Waiting for the quiz to begin
+            {state.room.status === "WAITING"
+              ? "Waiting for the quiz to begin"
+              : "Waiting for next question..."}
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-slate-500">
-            Stay on this screen. The quiz will start automatically.
+            {state.room.status === "WAITING"
+              ? "Stay on this screen. The quiz will start automatically."
+              : "Stay on this screen. Get ready!"}
           </p>
 
           <div className="mt-6 flex items-center justify-center gap-3 rounded-2xl bg-slate-50 px-4 py-4">
