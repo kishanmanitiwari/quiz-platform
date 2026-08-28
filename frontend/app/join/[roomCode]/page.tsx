@@ -100,14 +100,8 @@ export default function JoinPage({
   useEffect(() => {
     if (!participant) return;
 
-    // Added Reconnection limits to prevent infinite fetching on network drop
     const client = io(SOCKET_URL, {
       transports: ["websocket"],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 5000,
-      timeout: 10000,
     });
 
     const payload = {
@@ -117,12 +111,12 @@ export default function JoinPage({
     };
 
     client.on("connect", () => {
-      setMessage(""); // Clear any network error messages upon connection
       client.emit(
         "participant:reconnect",
         payload,
         (ack: { ok: boolean; state?: State; error?: string }) => {
           if (ack.ok && ack.state) {
+            // FIX: Explicitly cast to satisfy TypeScript / Vercel
             const incomingState = ack.state as State;
 
             setState((current) => ({
@@ -136,20 +130,6 @@ export default function JoinPage({
           }
         },
       );
-    });
-
-    // Handle when Socket.IO gives up trying to reconnect
-    client.io.on("reconnect_failed", () => {
-      setMessage(
-        "Network connection lost. Please check your internet and refresh the page.",
-      );
-    });
-
-    client.on("disconnect", (reason) => {
-      if (reason === "io server disconnect") {
-        // the disconnection was initiated by the server, you need to reconnect manually
-        client.connect();
-      }
     });
 
     client.on("room:state", (newState: State) => {
