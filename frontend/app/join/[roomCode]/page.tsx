@@ -1,53 +1,11 @@
 "use client";
 
-import { use, useEffect, useMemo, useState, useRef } from "react";
-import Link from "next/link";
-import QRCode from "qrcode";
+import { use, useEffect, useMemo, useState } from "react";
 import { io, type Socket } from "socket.io-client";
-import {
-  Maximize2,
-  Play,
-  FastForward,
-  Loader2,
-  Trophy,
-  Medal,
-  Download,
-} from "lucide-react";
-import { apiFetch } from "@/lib/api";
-import { SOCKET_URL, API_URL } from "@/lib/config";
+import { API_URL, SOCKET_URL } from "@/lib/config";
+import { getSessionId, participantKey } from "@/lib/session";
 
-type RoomPayload = {
-  room: {
-    id: string;
-    roomCode: string;
-    status: string;
-    currentQuestion: number;
-    questionEndsAt: string | null;
-    quiz: {
-      id: string;
-      title: string;
-      questions: {
-        order: number;
-        text: string;
-        optionA: string;
-        optionB: string;
-        optionC: string;
-        optionD: string;
-        correctOption: "A" | "B" | "C" | "D";
-      }[];
-    };
-    participants: { id: string; name: string }[];
-  };
-  leaderboard: {
-    rank: number;
-    name: string;
-    totalScore: number;
-    correctAnswers: number;
-    totalTime: number;
-  }[];
-};
-
-type PublicState = {
+type State = {
   room: {
     id: string;
     roomCode: string;
@@ -56,747 +14,753 @@ type PublicState = {
     questionEndsAt: string | null;
     participantCount: number;
   };
-  participants: { id: string; name: string }[];
-  currentQuestion: { order: number; text: string } | null;
+  quiz: {
+    title: string;
+    questionCount: number;
+  };
+  currentQuestion: null | {
+    id: string;
+    order: number;
+    text: string;
+    optionA: string;
+    optionB: string;
+    optionC: string;
+    optionD: string;
+    timeLimit: number;
+  };
+  alreadyAnswered: boolean;
 };
 
-export default function RoomPage({
+type Result = {
+  rank?: number;
+  totalScore?: number;
+  correctAnswers?: number;
+  totalQuestions?: number;
+};
+
+const QUOTES = [
+  "“Always think of Me, become My devotee, worship Me and offer your homage unto Me.”",
+  "“There is no truth superior to Me.”",
+  "“A person who sees Me in everything and everything in Me is never lost to Me.”",
+  "“One who is devoted to Me is very dear to Me.”",
+  "“The highest perfection of human life is to remember Krishna at all times.”",
+];
+
+export default function JoinPage({
   params,
 }: {
-  params: Promise<{ roomId: string }>;
+  params: Promise<{ roomCode: string }>;
 }) {
-  const { roomId } = use(params);
-  const [data, setData] = useState<RoomPayload | null>(null);
-  const [state, setState] = useState<PublicState | null>(null);
+  const { roomCode: rawRoomCode } = use(params);
+  const roomCode = rawRoomCode.toUpperCase();
+
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [age, setAge] = useState("");
+  const [gender, setGender] = useState("");
+  const [hasJoinedWa, setHasJoinedWa] = useState(false);
+  const [communityCode, setCommunityCode] = useState("");
+
+  const [isOnCooldown, setIsOnCooldown] = useState(false);
+
+  const [participant, setParticipant] = useState<{
+    id: string;
+    name: string;
+    sessionId: string;
+  } | null>(null);
+
+  const [state, setState] = useState<State | null>(null);
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [qr, setQr] = useState("");
   const [message, setMessage] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
 
-  const [isEmitting, setIsEmitting] = useState(false);
-  const hasAutoEndedRef = useRef(false);
-
-  const joinUrl = useMemo(() => {
-    if (!data) return "";
-    return `${window.location.origin}/join/${data.room.roomCode}`;
-  }, [data]);
-
-  async function load() {
-    try {
-      const body = await apiFetch<RoomPayload>(`/api/admin/rooms/${roomId}`);
-      setData(body);
-      setMessage((prev) => (prev.includes("offline") ? "" : prev));
-    } catch (error) {
-      console.warn("Network offline. Keeping current state in UI.");
-    }
-  }
+  const [quoteIndex, setQuoteIndex] = useState(0);
+  const [result, setResult] = useState<Result | null>(null);
 
   useEffect(() => {
-    void load();
+    if (typeof document !== "undefined") {
+      if (document.cookie.includes("quiz_cooldown=true")) {
+        setIsOnCooldown(true);
+      }
+    }
   }, []);
 
   useEffect(() => {
-    if (!data) return;
-    QRCode.toDataURL(joinUrl, { width: 360, margin: 1 }).then(setQr);
-  }, [data, joinUrl]);
+    const saved = localStorage.getItem(participantKey(roomCode));
+
+    if (!saved) return;
+
+    try {
+      setParticipant(JSON.parse(saved));
+    } catch {
+      localStorage.removeItem(participantKey(roomCode));
+    }
+  }, [roomCode]);
 
   useEffect(() => {
+    if (!participant) return;
+
+    // Added Reconnection limits to prevent infinite fetching on network drop
     const client = io(SOCKET_URL, {
-      transports: ["websocket"], // Removed polling to stop HTTP spam
-      auth: { token: localStorage.getItem("admin_token") },
+      transports: ["websocket"],
       reconnection: true,
-      reconnectionAttempts: 5, // FIXED: Changed from Infinity to 5
+      reconnectionAttempts: 5,
       reconnectionDelay: 2000,
       reconnectionDelayMax: 5000,
       timeout: 10000,
     });
 
-    const joinRoom = () => {
-      client.emit(
-        "admin:join",
-        { roomId },
-        (ack: { ok: boolean; state?: PublicState; error?: string }) => {
-          if (ack.ok && ack.state) {
-            if (ack.state.room) {
-              setState(ack.state);
-              setMessage("");
-            }
-          }
-          if (!ack.ok) setMessage(ack.error ?? "Socket join failed");
-        },
-      );
+    const payload = {
+      roomCode,
+      participantId: participant.id,
+      sessionId: participant.sessionId,
     };
 
     client.on("connect", () => {
-      setIsEmitting(false);
-      setMessage("");
-      joinRoom();
-      void load();
-    });
+      setMessage(""); // Clear any network error messages upon connection
+      client.emit(
+        "participant:reconnect",
+        payload,
+        (ack: { ok: boolean; state?: State; error?: string }) => {
+          if (ack.ok && ack.state) {
+            const incomingState = ack.state as State;
 
-    client.on("disconnect", () => {
-      setIsEmitting(false);
-      setMessage("⚠️ You are currently offline. Attempting to reconnect...");
-    });
+            setState((current) => ({
+              ...incomingState,
+              alreadyAnswered: current?.alreadyAnswered ?? false,
+            }));
+          }
 
-    client.on("connect_error", () => {
-      setIsEmitting(false);
-      setMessage("⚠️ Unable to connect. Retrying automatically...");
+          if (!ack.ok) {
+            setMessage(ack.error ?? "Reconnect failed");
+          }
+        },
+      );
     });
 
     // Handle when Socket.IO gives up trying to reconnect
     client.io.on("reconnect_failed", () => {
-      setIsEmitting(false);
       setMessage(
-        "⚠️ Network connection lost. Waiting for internet to return...",
+        "Network connection lost. Please check your internet and refresh the page.",
       );
     });
 
-    // WAKE UP THE SOCKET WHEN INTERNET RETURNS
-    const handleOnline = () => {
-      if (client.disconnected) {
-        setMessage("🌐 Network restored! Reconnecting...");
+    client.on("disconnect", (reason) => {
+      if (reason === "io server disconnect") {
+        // the disconnection was initiated by the server, you need to reconnect manually
         client.connect();
-        void load();
       }
-    };
-
-    window.addEventListener("online", handleOnline);
-
-    client.on("room:state", (incomingState: PublicState) => {
-      if (!incomingState?.room) return;
-      setState(incomingState);
     });
 
-    client.on("question:start", (incomingState: PublicState) => {
-      if (!incomingState?.room) return;
-      setState(incomingState);
-    });
-    client.on("leaderboard:update", (leaderboard) =>
-      setData((current) => (current ? { ...current, leaderboard } : current)),
-    );
-    client.on("question:end", ({ room, leaderboard }) => {
+    client.on("room:state", (newState: State) => {
       setState((current) =>
-        current ? { ...current, room: { ...current.room, ...room } } : current,
+        current
+          ? { ...newState, alreadyAnswered: current.alreadyAnswered }
+          : { ...newState, alreadyAnswered: false },
       );
-      setData((current) => (current ? { ...current, leaderboard } : current));
     });
-    client.on("quiz:finish", ({ room, leaderboard }) => {
+
+    client.on("question:start", (newState: State) => {
+      setState({
+        ...newState,
+        alreadyAnswered: false,
+      });
+
+      setMessage("");
+      requestAnimationFrame(() => {
+        (document.activeElement as HTMLElement | null)?.blur();
+      });
+    });
+
+    client.on("question:end", () => {
       setState((current) =>
-        current ? { ...current, room: { ...current.room, ...room } } : current,
+        current ? { ...current, alreadyAnswered: true } : current,
       );
-      setData((current) => (current ? { ...current, leaderboard } : current));
-      void load();
+    });
+
+    client.on("quiz:finish", ({ leaderboard }) => {
+      document.cookie = "quiz_cooldown=true; max-age=7200; path=/";
+      setIsOnCooldown(true);
+
+      const myResult = leaderboard?.find(
+        (x: any) => x.participantId === participant.id,
+      );
+
+      setResult({
+        rank: myResult?.rank,
+        totalScore: myResult?.totalScore,
+        correctAnswers: myResult?.correctAnswers,
+        totalQuestions: undefined,
+      });
+
+      setMessage("");
+
+      setState((current) =>
+        current
+          ? {
+              ...current,
+              room: {
+                ...current.room,
+                status: "FINISHED",
+              },
+              alreadyAnswered: false,
+            }
+          : current,
+      );
+
+      fetch(`${API_URL}/api/participants/${participant.id}/result`)
+        .then(async (res) => {
+          if (!res.ok) return;
+          const data = await res.json();
+          setResult((current) => ({
+            ...current,
+            ...data,
+          }));
+        })
+        .catch(() => {});
     });
 
     setSocket(client);
+
     return () => {
-      window.removeEventListener("online", handleOnline);
       client.close();
     };
-  }, [roomId]);
+  }, [participant, roomCode]);
 
-  function emit(name: string) {
-    if (isEmitting) return;
-
-    if (!socket || !socket.connected) {
-      setMessage("⚠️ Cannot perform action while offline. Wait for reconnect.");
+  useEffect(() => {
+    if (
+      state?.room.status !== "QUESTION_ACTIVE" ||
+      !state.room.questionEndsAt
+    ) {
+      setSecondsLeft(0);
       return;
     }
 
-    setIsEmitting(true);
-
-    socket
-      .timeout(5000)
-      .emit(
-        name,
-        { roomId },
-        (err: Error | null, ack: { ok: boolean; error?: string }) => {
-          setIsEmitting(false);
-
-          if (err) {
-            setMessage(
-              "⚠️ Network timeout. Please check your connection and try again.",
-            );
-            void load();
-            return;
-          }
-
-          setMessage(ack.ok ? "" : (ack.error ?? "Action failed"));
-          void load();
-        },
-      );
-  }
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      const questionEndsAt =
-        state?.room.questionEndsAt ?? data?.room.questionEndsAt;
-      if (!questionEndsAt) return setSecondsLeft(0);
+    const updateTimer = () => {
       setSecondsLeft(
         Math.max(
           0,
-          Math.ceil((new Date(questionEndsAt).getTime() - Date.now()) / 1000),
+          Math.ceil(
+            (new Date(state.room.questionEndsAt!).getTime() - Date.now()) /
+              1000,
+          ),
         ),
       );
-    }, 250);
-    return () => window.clearInterval(timer);
-  }, [data?.room.questionEndsAt, state?.room.questionEndsAt]);
+    };
 
-  const roomState = state?.room.status ?? data?.room.status ?? "WAITING";
-  const questionEndsAt =
-    state?.room.questionEndsAt ?? data?.room.questionEndsAt;
+    updateTimer();
+    const timer = window.setInterval(updateTimer, 500);
+
+    return () => window.clearInterval(timer);
+  }, [state?.room.status, state?.room.questionEndsAt]);
 
   useEffect(() => {
-    if (roomState === "QUESTION_ACTIVE" && secondsLeft > 0) {
-      hasAutoEndedRef.current = false;
-    }
+    if (!state) return;
 
-    if (
-      roomState === "QUESTION_ACTIVE" &&
-      secondsLeft === 0 &&
-      questionEndsAt &&
-      !hasAutoEndedRef.current
-    ) {
-      const hasExpired = Date.now() >= new Date(questionEndsAt).getTime();
-      if (hasExpired && !isEmitting) {
-        hasAutoEndedRef.current = true;
-        emit("question:end");
-      }
-    }
-  }, [secondsLeft, roomState, questionEndsAt, isEmitting]);
+    const isWaiting =
+      state.room.status !== "QUESTION_ACTIVE" &&
+      state.room.status !== "FINISHED";
 
-  async function finish() {
-    if (
-      !window.confirm(
-        "Are you sure you want to end the entire quiz session? This action cannot be undone.",
-      )
-    )
-      return;
+    if (!isWaiting) return;
 
-    if (isEmitting) return;
+    const timer = window.setInterval(() => {
+      setQuoteIndex((current) => (current + 1) % QUOTES.length);
+    }, 7000);
 
-    if (!socket || !socket.connected) {
-      setMessage("⚠️ Cannot perform action while offline. Wait for reconnect.");
-      return;
-    }
+    return () => window.clearInterval(timer);
+  }, [state?.room.status]);
 
-    setIsEmitting(true);
+  const options = useMemo(() => {
+    const q = state?.currentQuestion;
 
-    socket.timeout(5000).emit(
-      "quiz:finish",
-      { roomId },
-      (
-        err: Error | null,
-        ack: {
-          ok: boolean;
-          error?: string;
-          leaderboard?: RoomPayload["leaderboard"];
+    return q
+      ? [
+          ["A", q.optionA],
+          ["B", q.optionB],
+          ["C", q.optionC],
+          ["D", q.optionD],
+        ]
+      : [];
+  }, [state?.currentQuestion]);
+
+  async function join() {
+    setMessage("");
+    const sessionId = getSessionId();
+
+    try {
+      const res = await fetch(`${API_URL}/api/join`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
         },
-      ) => {
-        setIsEmitting(false);
+        body: JSON.stringify({
+          roomCode,
+          name,
+          phone,
+          age: Number(age),
+          gender,
+          communityCode,
+          sessionId,
+        }),
+      });
 
-        if (err) {
-          setMessage(
-            "⚠️ Network timeout. Please check your connection and try again.",
+      const body = await res.json();
+
+      if (!res.ok) {
+        const errString = String(body.error || "").toLowerCase();
+
+        if (
+          errString.includes("unique") ||
+          errString.includes("already") ||
+          errString.includes("p2002")
+        ) {
+          return setMessage(
+            "You have already joined or played this quiz with this WhatsApp number!",
           );
-          void load();
+        }
+
+        return setMessage(body.error ?? "Could not join room");
+      }
+
+      const saved = {
+        id: body.participant.id,
+        name: body.participant.name,
+        sessionId,
+      };
+
+      localStorage.setItem(participantKey(roomCode), JSON.stringify(saved));
+
+      setParticipant(saved);
+      setState({
+        ...body.state,
+        alreadyAnswered: false,
+      });
+    } catch {
+      setMessage("Network error. Please try again.");
+    }
+  }
+
+  function answer(selectedOption: string) {
+    if (
+      !socket ||
+      !participant ||
+      !state?.currentQuestion ||
+      state.alreadyAnswered
+    ) {
+      return;
+    }
+
+    socket.emit(
+      "answer:submit",
+      {
+        roomCode,
+        participantId: participant.id,
+        sessionId: participant.sessionId,
+        questionId: state.currentQuestion.id,
+        selectedOption,
+      },
+      (ack: { ok: boolean; error?: string }) => {
+        if (!ack.ok) {
+          setMessage(ack.error ?? "Answer rejected");
           return;
         }
 
-        setMessage(ack.ok ? "" : (ack.error ?? "Finish failed"));
-        const leaderboard = ack.leaderboard;
-        if (leaderboard)
-          setData((current) =>
-            current ? { ...current, leaderboard } : current,
-          );
-        void load();
+        setMessage("");
+        setState((current) =>
+          current
+            ? {
+                ...current,
+                alreadyAnswered: true,
+              }
+            : current,
+        );
+
+        requestAnimationFrame(() => {
+          (document.activeElement as HTMLElement | null)?.blur();
+        });
       },
     );
   }
 
-  // CSV Download Logic (Left commented out as it was in your snippet)
-  async function downloadCSV() {
-    if (isEmitting) return;
-    setIsEmitting(true);
-    setMessage("Preparing CSV...");
-
-    try {
-      const token = localStorage.getItem("admin_token");
-      const res = await fetch(`${API_URL}/api/admin/rooms/${roomId}/export`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!res.ok) throw new Error("Export failed");
-
-      const blob = await res.blob();
-
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `iskcon-quiz-${data?.room.roomCode}.csv`;
-      document.body.appendChild(a);
-      a.click();
-
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      setMessage("");
-    } catch (error) {
-      setMessage("Failed to download CSV.");
-    } finally {
-      setIsEmitting(false);
-    }
-  }
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "WAITING":
-        return (
-          <span className="rounded bg-slate-200 px-2 py-1 text-xs font-bold tracking-wide text-slate-800">
-            WAITING FOR PLAYERS
-          </span>
-        );
-      case "QUESTION_ACTIVE":
-        return (
-          <span className="animate-pulse rounded bg-emerald-500 px-2 py-1 text-xs font-bold tracking-wide text-white">
-            LIVE
-          </span>
-        );
-      case "ACTIVE":
-      case "QUESTION_ENDED":
-      case "WAITING_FOR_NEXT":
-        return (
-          <span className="rounded bg-amber-400 px-2 py-1 text-xs font-bold tracking-wide text-amber-950">
-            ACTIVE
-          </span>
-        );
-      case "FINISHED":
-        return (
-          <span className="rounded bg-slate-800 px-2 py-1 text-xs font-bold tracking-wide text-white">
-            FINISHED
-          </span>
-        );
-      default:
-        return (
-          <span className="rounded bg-slate-200 px-2 py-1 text-xs font-bold tracking-wide text-slate-800">
-            {status}
-          </span>
-        );
-    }
-  };
-
-  if (!data) return <main className="p-6">Loading...</main>;
-
-  const participants = state?.participants ?? data.room.participants;
-  const currentQuestionNumber =
-    state?.room.currentQuestion ?? data.room.currentQuestion;
-
-  const currentQuestion = data.room.quiz.questions.find(
-    (question) => question.order === currentQuestionNumber,
-  );
-
-  const timerExpired = questionEndsAt
-    ? Date.now() >= new Date(questionEndsAt).getTime()
-    : false;
-
-  const showCorrectAnswer = Boolean(
-    currentQuestion &&
-    currentQuestionNumber > 0 &&
-    (roomState !== "QUESTION_ACTIVE" || timerExpired),
-  );
-
-  const winner = data.leaderboard[0];
-  const runnersUp = data.leaderboard.slice(1);
-
-  return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8">
-      <section className="mx-auto max-w-7xl">
-        <Link
-          href={`/admin/quiz/${data.room.quiz.id}`}
-          className="text-sm font-semibold text-leaf hover:underline"
-        >
-          &larr; Back to quiz
-        </Link>
-        <div className="mt-3 flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold">
-                QuizSession {data.room.roomCode}
-              </h1>
-              {getStatusBadge(roomState)}
-            </div>
-            <p className="mt-1 text-sm text-slate-600 font-medium">
-              {data.room.quiz.title}
+  if (!participant) {
+    return (
+      <main className="min-h-screen bg-gradient-to-b from-slate-50 to-emerald-50/40 px-4 py-8">
+        <section className="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-200/50">
+          <div className="text-center">
+            <p className="text-sm font-bold uppercase tracking-widest text-leaf">
+              Hare Krishna 🙏
             </p>
-            {roomState === "WAITING" && (
-              <p className="mt-2 break-all text-sm text-slate-500 bg-slate-200 inline-block px-3 py-1 rounded-md">
-                {joinUrl}
-              </p>
-            )}
+            <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              QuizSession {roomCode}
+            </p>
+            <h1 className="mt-4 text-3xl font-black tracking-tight text-slate-900">
+              ISKCON Event Quiz
+            </h1>
+            <p className="mt-2 text-sm text-slate-500">
+              Test your knowledge, have fun and remember Krishna.
+            </p>
           </div>
 
-          {roomState !== "FINISHED" && (
-            <div className="flex flex-wrap gap-3">
-              {roomState === "WAITING" && (
-                <button
-                  className="focus-ring inline-flex items-center gap-2 rounded-md bg-leaf px-5 py-3 font-bold text-white transition-opacity hover:opacity-90 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  onClick={() => emit("quiz:start")}
-                  disabled={isEmitting}
-                >
-                  {isEmitting ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <Play size={18} />
-                  )}{" "}
-                  Start Quiz Session
-                </button>
-              )}
+          <div className="mt-8">
+            <label className="block text-sm font-bold text-slate-800">
+              Your Name
+            </label>
+            <input
+              className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={40}
+              placeholder="Enter your full name"
+            />
+          </div>
 
-              {roomState !== "WAITING" && (
-                <>
-                  {roomState === "QUESTION_ACTIVE" ? (
-                    <button
-                      className={`focus-ring inline-flex items-center gap-2 rounded-md px-5 py-3 font-bold transition-colors shadow-sm disabled:cursor-not-allowed ${
-                        secondsLeft > 0
-                          ? "border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-                          : "bg-slate-200 text-slate-500"
-                      }`}
-                      onClick={() => emit("question:end")}
-                      disabled={secondsLeft === 0 || isEmitting}
-                      title="Reveal answers and leaderboard"
-                    >
-                      {secondsLeft === 0 || isEmitting ? (
-                        <>
-                          <Loader2 size={18} className="animate-spin" />{" "}
-                          Fetching Results...
-                        </>
-                      ) : (
-                        <>
-                          <FastForward size={18} /> Skip Remaining Time
-                        </>
-                      )}
-                    </button>
-                  ) : (
-                    <button
-                      className="focus-ring inline-flex items-center gap-2 rounded-md bg-saffron px-5 py-3 font-bold text-ink transition-opacity hover:opacity-90 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                      onClick={() => emit("question:start")}
-                      disabled={isEmitting}
-                    >
-                      {isEmitting ? (
-                        <Loader2 size={18} className="animate-spin" />
-                      ) : (
-                        <Play size={18} />
-                      )}
-                      {currentQuestionNumber > 0
-                        ? "Start Next Question"
-                        : "Start First Question"}
-                    </button>
-                  )}
-                </>
-              )}
+          <div className="mt-5">
+            <label className="block text-sm font-bold text-slate-800">
+              WhatsApp Number
+            </label>
+            <input
+              type="tel"
+              inputMode="numeric"
+              className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
+              value={phone}
+              onChange={(e) =>
+                setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
+              }
+              placeholder="10-digit WhatsApp number"
+            />
+          </div>
 
-              <button
-                className="focus-ring rounded-md bg-slate-900 px-5 py-3 font-bold text-white transition-opacity hover:opacity-90 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={finish}
-                disabled={isEmitting}
+          <div className="mt-5 grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-800">
+                Age
+              </label>
+              <input
+                type="number"
+                className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                placeholder="e.g. 25"
+                min="1"
+                max="120"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-800">
+                Gender
+              </label>
+              <select
+                className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
               >
-                🏁 Finish Quiz
-              </button>
+                <option value="" disabled>
+                  Select
+                </option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="mb-3 text-center text-sm font-bold text-emerald-900">
+              Join the community to play
+            </p>
+
+            <a
+              href="https://chat.whatsapp.com/YOUR_INVITE_LINK_HERE"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3.5 font-bold text-white shadow-sm transition hover:opacity-90"
+            >
+              💬 Step 1: Join WhatsApp Group
+            </a>
+
+            <label className="mt-4 flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
+                checked={hasJoinedWa}
+                onChange={(e) => setHasJoinedWa(e.target.checked)}
+              />
+              <span className="text-sm font-semibold leading-relaxed text-slate-800">
+                Step 2: I confirm I have joined the ISKCON WhatsApp Community.
+              </span>
+            </label>
+
+            <div className="mt-4 border-t border-emerald-200 pt-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-bold text-emerald-900">
+                  Step 3: Enter Community Code
+                </span>
+                <input
+                  type="text"
+                  className="focus-ring w-full rounded-xl border border-emerald-300 bg-white px-4 py-3 outline-none transition focus:border-emerald-600"
+                  value={communityCode}
+                  onChange={(e) => setCommunityCode(e.target.value)}
+                  placeholder="Code from community description"
+                />
+              </label>
+            </div>
+          </div>
+
+          {isOnCooldown ? (
+            <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-center shadow-sm">
+              <p className="font-bold text-amber-900">Cooldown Active ⏳</p>
+              <p className="mt-1 text-sm font-medium text-amber-800">
+                You have already completed the quiz. Please wait 2 hours before
+                playing again.
+              </p>
+            </div>
+          ) : (
+            <button
+              className="focus-ring mt-6 w-full rounded-xl bg-leaf px-4 py-3.5 font-bold text-white shadow-md transition hover:-translate-y-0.5 hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={
+                !name.trim() ||
+                phone.length !== 10 ||
+                !age ||
+                !gender ||
+                !communityCode.trim() ||
+                !hasJoinedWa
+              }
+              onClick={join}
+            >
+              Enter Quiz →
+            </button>
+          )}
+
+          {message && (
+            <div className="mt-4 rounded-xl border border-red-100 bg-red-50 p-3 text-center">
+              <p className="text-sm font-semibold text-red-600">{message}</p>
             </div>
           )}
+        </section>
+      </main>
+    );
+  }
+
+  if (!state) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+        <div className="text-center">
+          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-leaf" />
+          <p className="mt-4 font-semibold text-slate-700">
+            Connecting to the quiz...
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (state.room.status === "QUESTION_ACTIVE" && state.currentQuestion) {
+    return (
+      <main className="min-h-screen bg-slate-50 px-4 py-6">
+        <section key={state.currentQuestion.id} className="mx-auto max-w-xl">
+          <div className="flex items-center justify-between text-sm font-bold text-slate-700">
+            <span>
+              Question {state.currentQuestion.order}/{state.quiz.questionCount}
+            </span>
+            <span
+              className={`rounded-full px-3 py-1 ${
+                secondsLeft <= 5
+                  ? "bg-red-100 text-red-700"
+                  : "bg-emerald-100 text-leaf"
+              }`}
+            >
+              {secondsLeft}s
+            </span>
+          </div>
+
+          <h1 className="mt-6 text-2xl font-black leading-tight text-slate-900">
+            {state.currentQuestion.text}
+          </h1>
+
+          <div className="mt-7 grid gap-3">
+            {options.map(([key, label]) => (
+              <button
+                key={`${state.currentQuestion!.id}-${key}`}
+                type="button"
+                disabled={
+                  state.alreadyAnswered ||
+                  secondsLeft === 0 ||
+                  state.room.status !== "QUESTION_ACTIVE"
+                }
+                onClick={() => answer(key)}
+                className="focus-ring rounded-2xl border border-slate-200 bg-white p-5 text-left font-semibold shadow-sm transition hover:-translate-y-0.5 hover:border-leaf hover:shadow-md focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <span className="mr-3 inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-50 text-sm font-black text-leaf">
+                  {key}
+                </span>
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {state.alreadyAnswered && (
+            <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
+              <p className="font-bold text-emerald-900">Answer locked ✓</p>
+              <p className="mt-1 text-sm font-medium text-emerald-800">
+                Get ready for the next question.
+              </p>
+            </div>
+          )}
+
+          {message && (
+            <p className="mt-4 text-center text-sm font-semibold text-red-600">
+              {message}
+            </p>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  if (state.room.status === "FINISHED") {
+    const rank = result?.rank;
+    const score = result?.totalScore;
+
+    return (
+      <main className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-slate-50 px-4 py-8">
+        <section className="mx-auto max-w-md">
+          <div className="text-center">
+            <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-4xl shadow-sm">
+              🎉
+            </div>
+            <p className="mt-5 text-sm font-bold uppercase tracking-widest text-leaf">
+              Hare Krishna 🙏
+            </p>
+            <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-900">
+              Hari Bol!
+            </h1>
+            <p className="mt-2 text-slate-600">
+              You completed the quiz,{" "}
+              <span className="font-bold text-slate-900">
+                {participant.name}
+              </span>
+              .
+            </p>
+          </div>
+
+          <div className="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
+            <div className="bg-leaf px-6 py-6 text-center text-white">
+              <p className="text-sm font-bold uppercase tracking-widest opacity-80">
+                Your Score
+              </p>
+              <div className="mt-2 text-5xl font-black">{score ?? "—"}</div>
+            </div>
+
+            <div className="grid grid-cols-2 divide-x divide-slate-200">
+              <div className="p-5 text-center">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                  Rank
+                </p>
+                <p className="mt-1 text-3xl font-black text-slate-900">
+                  {rank ? `#${rank}` : "—"}
+                </p>
+              </div>
+
+              <div className="p-5 text-center">
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                  Participants
+                </p>
+                <p className="mt-1 text-3xl font-black text-slate-900">
+                  {state.room.participantCount}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-5 text-center">
+            <p className="font-bold text-emerald-900">
+              Thank you for participating! 🙏
+            </p>
+            <p className="mt-2 text-sm leading-relaxed text-emerald-800">
+              Keep learning, keep serving and keep remembering Krishna.
+            </p>
+          </div>
+
+          <p className="mt-6 text-center text-sm font-semibold text-slate-500">
+            Final results are also available on the event screen.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-slate-50 px-4 py-8">
+      <section className="mx-auto max-w-md">
+        <div className="text-center">
+          <p className="text-sm font-bold uppercase tracking-widest text-leaf">
+            Hare Krishna 🙏
+          </p>
+          <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            QuizSession {roomCode}
+          </p>
+          <h1 className="mt-5 text-4xl font-black tracking-tight text-slate-900">
+            You're In!
+          </h1>
+          <p className="mt-2 text-slate-600">
+            Welcome,{" "}
+            <span className="font-bold text-slate-900">{participant.name}</span>
+          </p>
+        </div>
+
+        <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-xl shadow-slate-200/50">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50">
+            <span className="text-3xl">🙏</span>
+          </div>
+          <h2 className="mt-4 text-xl font-black text-slate-900">
+            Waiting for the quiz to begin
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-slate-500">
+            Stay on this screen. The quiz will start automatically.
+          </p>
+
+          <div className="mt-6 flex items-center justify-center gap-3 rounded-2xl bg-slate-50 px-4 py-4">
+            <span className="text-2xl">👥</span>
+            <div className="text-left">
+              <p className="text-2xl font-black text-slate-900">
+                {state.room.participantCount}
+              </p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                devotees joined
+              </p>
+            </div>
+            <span className="ml-2 h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-3xl border border-amber-100 bg-amber-50 p-6">
+          <p className="text-center text-xs font-bold uppercase tracking-widest text-amber-700">
+            Krishna-Conscious Thought
+          </p>
+          <p
+            key={quoteIndex}
+            className="mt-4 min-h-[72px] text-center text-base font-semibold leading-relaxed text-amber-950"
+          >
+            {QUOTES[quoteIndex]}
+          </p>
+          <div className="mt-5 flex justify-center gap-1.5">
+            {QUOTES.map((_, index) => (
+              <span
+                key={index}
+                className={`h-1.5 rounded-full transition-all ${
+                  index === quoteIndex
+                    ? "w-5 bg-amber-600"
+                    : "w-1.5 bg-amber-300"
+                }`}
+              />
+            ))}
+          </div>
         </div>
 
         {message && (
-          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
-            <p className="text-sm font-semibold text-amber-900">{message}</p>
-          </div>
-        )}
-
-        {roomState === "FINISHED" ? (
-          <div className="mt-12 text-center">
-            {winner ? (
-              <div className="relative mx-auto mb-12 max-w-4xl overflow-hidden rounded-[2rem] bg-gradient-to-br from-amber-400 via-yellow-400 to-orange-500 p-16 shadow-[0_10px_50px_rgba(251,191,36,0.4)] border-4 border-yellow-200">
-                <div className="absolute left-8 top-8 animate-bounce text-7xl opacity-90 drop-shadow-md">
-                  🎈
-                </div>
-                <div className="absolute right-12 top-16 animate-pulse text-7xl opacity-90 drop-shadow-md">
-                  🎉
-                </div>
-                <div
-                  className="absolute bottom-12 left-16 animate-bounce text-6xl opacity-90 drop-shadow-md"
-                  style={{ animationDelay: "0.2s" }}
-                >
-                  🎊
-                </div>
-                <div
-                  className="absolute bottom-8 right-16 animate-bounce text-7xl opacity-90 drop-shadow-md"
-                  style={{ animationDelay: "0.5s" }}
-                >
-                  🎈
-                </div>
-
-                <Trophy className="mx-auto mb-6 h-32 w-32 text-white drop-shadow-xl" />
-                <h2 className="text-2xl font-black uppercase tracking-widest text-yellow-900/60">
-                  Grand Winner
-                </h2>
-                <h3 className="mt-2 text-7xl font-black text-white drop-shadow-lg">
-                  {winner.name}
-                </h3>
-                <p className="mt-8 inline-block rounded-full bg-white/25 px-10 py-4 text-4xl font-black tracking-tight text-white backdrop-blur-sm shadow-inner">
-                  {winner.totalScore}{" "}
-                  <span className="text-2xl font-bold uppercase tracking-wider opacity-80">
-                    Points
-                  </span>
-                </p>
-              </div>
-            ) : (
-              <p className="text-center text-slate-500">
-                No participants scored any points.
-              </p>
-            )}
-
-            {runnersUp.length > 0 && (
-              <div className="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-                <h3 className="mb-6 text-left text-2xl font-bold text-slate-800">
-                  Runner Ups
-                </h3>
-                <div className="grid gap-4 text-left">
-                  {runnersUp.map((row, index) => {
-                    let badgeClass = "bg-white border-slate-200 text-slate-700";
-                    let rankIcon = (
-                      <span className="font-black text-slate-400">
-                        #{row.rank}
-                      </span>
-                    );
-
-                    if (index === 0) {
-                      badgeClass =
-                        "bg-slate-100 border-slate-300 text-slate-800";
-                      rankIcon = <Medal className="h-6 w-6 text-slate-500" />;
-                    } else if (index === 1) {
-                      badgeClass =
-                        "bg-orange-100 border-orange-300 text-orange-900";
-                      rankIcon = <Medal className="h-6 w-6 text-orange-600" />;
-                    }
-
-                    return (
-                      <div
-                        key={`${row.rank}-${row.name}`}
-                        className={`flex items-center justify-between rounded-xl px-6 py-4 border-2 transition-all ${badgeClass}`}
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center">
-                            {rankIcon}
-                          </div>
-                          <span className="text-xl font-bold">{row.name}</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="block text-2xl font-black tracking-tight">
-                            {row.totalScore}
-                          </span>
-                          <span className="block text-xs font-semibold uppercase tracking-wider opacity-70">
-                            Points
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <>
-            {roomState === "WAITING" ? (
-              <div className="mt-8 grid gap-6 lg:grid-cols-[360px_1fr]">
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h2 className="text-center font-bold text-slate-800 text-lg mb-4">
-                    Join the Game!
-                  </h2>
-                  {qr && (
-                    <img
-                      src={qr}
-                      alt={`QR code for ${joinUrl}`}
-                      className="mx-auto h-auto w-full max-w-[320px] rounded-lg border-4 border-slate-100"
-                    />
-                  )}
-                  <button
-                    className="focus-ring mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-white px-4 py-3 font-semibold text-ink ring-1 ring-slate-300 hover:bg-slate-50 transition-colors"
-                    onClick={() => qr && window.open(qr, "_blank")}
-                  >
-                    <Maximize2 size={18} /> Fullscreen QR
-                  </button>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h2 className="text-xl font-bold mb-6 border-b pb-4">
-                    Participants ({participants.length})
-                  </h2>
-                  <div className="flex flex-wrap gap-2">
-                    {participants.map((p) => (
-                      <p
-                        key={p.id}
-                        className="rounded-full bg-slate-100 px-4 py-2 font-semibold text-slate-700 border border-slate-200"
-                      >
-                        {p.name}
-                      </p>
-                    ))}
-                    {participants.length === 0 && (
-                      <p className="text-slate-500 italic mt-4 w-full text-center">
-                        Waiting for players to scan and join...
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_380px]">
-                <div className="flex flex-col gap-6">
-                  {roomState === "QUESTION_ACTIVE" && (
-                    <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-5 py-4 shadow-sm">
-                      <Loader2
-                        className="animate-spin text-emerald-600"
-                        size={24}
-                      />
-                      <p className="text-lg font-bold text-emerald-800 tracking-wide">
-                        Question is LIVE! Answers are locking in...
-                      </p>
-                    </div>
-                  )}
-
-                  {state?.currentQuestion || currentQuestion ? (
-                    <div className="rounded-xl border-2 border-slate-200 bg-white p-8 shadow-md">
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-8">
-                        <div>
-                          <p className="text-sm font-bold text-leaf uppercase tracking-widest bg-emerald-50 inline-block px-3 py-1 rounded-full">
-                            Question{" "}
-                            {state?.currentQuestion?.order ??
-                              currentQuestion?.order}{" "}
-                            of {data.room.quiz.questions.length}
-                          </p>
-                          <p className="mt-4 text-3xl font-black text-slate-900 leading-tight">
-                            {state?.currentQuestion?.text ??
-                              currentQuestion?.text}
-                          </p>
-                        </div>
-
-                        {secondsLeft > 0 && (
-                          <div
-                            className={`flex shrink-0 flex-col items-center justify-center rounded-2xl px-6 py-4 transition-all duration-300 ${
-                              secondsLeft <= 5
-                                ? "bg-red-600 text-white animate-pulse shadow-[0_0_20px_rgba(220,38,38,0.6)] scale-105"
-                                : "bg-slate-900 text-white"
-                            }`}
-                          >
-                            <span className="text-xs font-bold uppercase tracking-widest opacity-80">
-                              Time Left
-                            </span>
-                            <span className="mt-1 font-mono text-5xl font-black tabular-nums leading-none">
-                              {secondsLeft}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
-                      {currentQuestion && (
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mt-4">
-                          {(["A", "B", "C", "D"] as const).map((letter) => {
-                            const isCorrect =
-                              showCorrectAnswer &&
-                              currentQuestion.correctOption === letter;
-
-                            return (
-                              <div
-                                key={letter}
-                                className={`flex items-center rounded-xl border-2 p-5 transition-colors ${
-                                  isCorrect
-                                    ? "border-emerald-500 bg-emerald-100 shadow-sm"
-                                    : "border-slate-200 bg-slate-50"
-                                }`}
-                              >
-                                <span
-                                  className={`mr-4 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg font-black text-lg shadow-sm transition-colors ${
-                                    isCorrect
-                                      ? "bg-emerald-600 text-white"
-                                      : "bg-white text-slate-500 border border-slate-200"
-                                  }`}
-                                >
-                                  {letter}
-                                </span>
-                                <span
-                                  className={`text-lg font-bold ${isCorrect ? "text-emerald-950" : "text-slate-700"}`}
-                                >
-                                  {currentQuestion[`option${letter}`]}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="flex h-64 items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50">
-                      <p className="text-xl font-semibold text-slate-500">
-                        Waiting for next question...
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-6">
-                  <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden flex flex-col max-h-[800px]">
-                    <div className="bg-slate-900 px-6 py-4">
-                      <h2 className="text-lg font-bold text-white flex justify-between items-center">
-                        Live Leaderboard{" "}
-                        <Trophy size={18} className="text-yellow-400" />
-                      </h2>
-                    </div>
-
-                    <div className="p-4 overflow-y-auto custom-scrollbar">
-                      <div className="grid gap-2">
-                        {data.leaderboard.length === 0 ? (
-                          <p className="text-center text-slate-500 py-4 italic">
-                            No scores yet
-                          </p>
-                        ) : (
-                          data.leaderboard.map((row) => (
-                            <div
-                              key={`${row.rank}-${row.name}`}
-                              className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3 border border-slate-100 hover:border-slate-300 transition-colors"
-                            >
-                              <div className="flex items-center gap-3 truncate pr-4">
-                                <span
-                                  className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-black ${
-                                    row.rank === 1
-                                      ? "bg-yellow-400 text-yellow-900"
-                                      : row.rank === 2
-                                        ? "bg-slate-300 text-slate-800"
-                                        : row.rank === 3
-                                          ? "bg-orange-300 text-orange-900"
-                                          : "bg-slate-200 text-slate-600"
-                                  }`}
-                                >
-                                  {row.rank}
-                                </span>
-                                <span className="font-bold text-slate-800 truncate">
-                                  {row.name}
-                                </span>
-                              </div>
-                              <span className="font-black text-leaf tabular-nums bg-emerald-100 px-2 py-1 rounded">
-                                {row.totalScore}
-                              </span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </>
+          <p className="mt-4 text-center text-sm font-semibold text-red-600">
+            {message}
+          </p>
         )}
       </section>
     </main>
