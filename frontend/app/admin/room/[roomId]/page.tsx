@@ -11,7 +11,6 @@ import {
   Loader2,
   Trophy,
   Medal,
-  Download,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { SOCKET_URL, API_URL } from "@/lib/config";
@@ -102,11 +101,13 @@ export default function RoomPage({
 
   useEffect(() => {
     const client = io(SOCKET_URL, {
-      transports: ["websocket", "polling"],
+      transports: ["websocket"],
       auth: { token: localStorage.getItem("admin_token") },
       reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
     });
 
     const joinRoom = () => {
@@ -133,7 +134,6 @@ export default function RoomPage({
     });
 
     client.on("disconnect", () => {
-      // Never leave action buttons/spinners locked while offline.
       setIsEmitting(false);
       setMessage("⚠️ You are currently offline. Attempting to reconnect...");
     });
@@ -142,6 +142,23 @@ export default function RoomPage({
       setIsEmitting(false);
       setMessage("⚠️ Unable to connect. Retrying automatically...");
     });
+
+    client.io.on("reconnect_failed", () => {
+      setIsEmitting(false);
+      setMessage(
+        "⚠️ Network connection lost. Waiting for internet to return...",
+      );
+    });
+
+    const handleOnline = () => {
+      if (client.disconnected) {
+        setMessage("🌐 Network restored! Reconnecting...");
+        client.connect();
+        void load();
+      }
+    };
+
+    window.addEventListener("online", handleOnline);
 
     client.on("room:state", (incomingState: PublicState) => {
       if (!incomingState?.room) return;
@@ -152,15 +169,18 @@ export default function RoomPage({
       if (!incomingState?.room) return;
       setState(incomingState);
     });
+
     client.on("leaderboard:update", (leaderboard) =>
       setData((current) => (current ? { ...current, leaderboard } : current)),
     );
+
     client.on("question:end", ({ room, leaderboard }) => {
       setState((current) =>
         current ? { ...current, room: { ...current.room, ...room } } : current,
       );
       setData((current) => (current ? { ...current, leaderboard } : current));
     });
+
     client.on("quiz:finish", ({ room, leaderboard }) => {
       setState((current) =>
         current ? { ...current, room: { ...current.room, ...room } } : current,
@@ -170,7 +190,9 @@ export default function RoomPage({
     });
 
     setSocket(client);
+
     return () => {
+      window.removeEventListener("online", handleOnline);
       client.close();
     };
   }, [roomId]);
@@ -185,7 +207,6 @@ export default function RoomPage({
 
     setIsEmitting(true);
 
-    // FIX: Add 5000ms timeout to emit
     socket
       .timeout(5000)
       .emit(
@@ -198,8 +219,6 @@ export default function RoomPage({
             setMessage(
               "⚠️ Network timeout. Please check your connection and try again.",
             );
-            // Refresh from the API in case the server processed the action
-            // even though the socket acknowledgement was lost.
             void load();
             return;
           }
@@ -265,7 +284,6 @@ export default function RoomPage({
 
     setIsEmitting(true);
 
-    // FIX: Add 5000ms timeout to finish
     socket.timeout(5000).emit(
       "quiz:finish",
       { roomId },
@@ -296,41 +314,6 @@ export default function RoomPage({
         void load();
       },
     );
-  }
-
-  // CSV Download Logic
-  async function downloadCSV() {
-    if (isEmitting) return;
-    setIsEmitting(true);
-    setMessage("Preparing CSV...");
-
-    try {
-      const token = localStorage.getItem("admin_token");
-      const res = await fetch(`${API_URL}/api/admin/rooms/${roomId}/export`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!res.ok) throw new Error("Export failed");
-
-      const blob = await res.blob();
-
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `iskcon-quiz-${data?.room.roomCode}.csv`;
-      document.body.appendChild(a);
-      a.click();
-
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      setMessage("");
-    } catch (error) {
-      setMessage("Failed to download CSV.");
-    } finally {
-      setIsEmitting(false);
-    }
   }
 
   const getStatusBadge = (status: string) => {
@@ -499,22 +482,6 @@ export default function RoomPage({
 
         {roomState === "FINISHED" ? (
           <div className="mt-12 text-center">
-            {/* CSV Download Button */}
-            {/* <div className="mb-8 flex justify-center">
-              <button
-                onClick={downloadCSV}
-                disabled={isEmitting}
-                className="focus-ring inline-flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-4 font-bold text-white shadow-md transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50"
-              >
-                {isEmitting ? (
-                  <Loader2 size={20} className="animate-spin" />
-                ) : (
-                  <Download size={20} />
-                )}
-                Download Event Data (CSV)
-              </button>
-            </div> */}
-
             {winner ? (
               <div className="relative mx-auto mb-12 max-w-4xl overflow-hidden rounded-[2rem] bg-gradient-to-br from-amber-400 via-yellow-400 to-orange-500 p-16 shadow-[0_10px_50px_rgba(251,191,36,0.4)] border-4 border-yellow-200">
                 <div className="absolute left-8 top-8 animate-bounce text-7xl opacity-90 drop-shadow-md">
