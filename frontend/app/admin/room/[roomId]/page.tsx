@@ -13,7 +13,7 @@ import {
   Medal,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { SOCKET_URL } from "@/lib/config";
+import { SOCKET_URL, API_URL } from "@/lib/config";
 
 type RoomPayload = {
   room: {
@@ -80,12 +80,11 @@ export default function RoomPage({
     return `${window.location.origin}/join/${data.room.roomCode}`;
   }, [data]);
 
-  // FIX 3: Safe load() function that doesn't crash if internet drops
   async function load() {
     try {
       const body = await apiFetch<RoomPayload>(`/api/admin/rooms/${roomId}`);
       setData(body);
-      setMessage((prev) => (prev.includes("offline") ? "" : prev)); // Clear offline warning if successful
+      setMessage((prev) => (prev.includes("offline") ? "" : prev));
     } catch (error) {
       console.warn("Network offline. Keeping current state in UI.");
     }
@@ -101,7 +100,6 @@ export default function RoomPage({
   }, [data, joinUrl]);
 
   useEffect(() => {
-    // FIX 1: Explicit infinite auto-reconnect config with token
     const client = io(SOCKET_URL, {
       transports: ["websocket"],
       auth: { token: localStorage.getItem("admin_token") },
@@ -116,8 +114,10 @@ export default function RoomPage({
         { roomId },
         (ack: { ok: boolean; state?: PublicState; error?: string }) => {
           if (ack.ok && ack.state) {
-            setState(ack.state);
-            setMessage(""); // Clear any disconnect messages
+            // FIX: Explicitly cast to PublicState to satisfy TypeScript / Vercel build
+            const incomingState = ack.state as PublicState;
+            setState(incomingState);
+            setMessage("");
           }
           if (!ack.ok) setMessage(ack.error ?? "Socket join failed");
         },
@@ -125,8 +125,7 @@ export default function RoomPage({
     };
 
     client.on("connect", joinRoom);
-    
-    // Warn admin if socket disconnects (e.g. bad internet)
+
     client.on("disconnect", () => {
       setMessage("⚠️ You are currently offline. Attempting to reconnect...");
     });
@@ -159,7 +158,6 @@ export default function RoomPage({
   function emit(name: string) {
     if (isEmitting) return;
 
-    // FIX 2: Prevent getting stuck in a loading state if admin clicks while offline
     if (socket && !socket.connected) {
       setMessage("⚠️ Cannot perform action while offline. Wait for reconnect.");
       return;
@@ -174,7 +172,6 @@ export default function RoomPage({
     });
   }
 
-  // Timer Tick Hook
   useEffect(() => {
     const timer = window.setInterval(() => {
       const questionEndsAt =
@@ -194,7 +191,6 @@ export default function RoomPage({
   const questionEndsAt =
     state?.room.questionEndsAt ?? data?.room.questionEndsAt;
 
-  // Auto-End Hook
   useEffect(() => {
     if (roomState === "QUESTION_ACTIVE" && secondsLeft > 0) {
       hasAutoEndedRef.current = false;
@@ -323,7 +319,9 @@ export default function RoomPage({
         <div className="mt-3 flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold">QuizSession {data.room.roomCode}</h1>
+              <h1 className="text-3xl font-bold">
+                QuizSession {data.room.roomCode}
+              </h1>
               {getStatusBadge(roomState)}
             </div>
             <p className="mt-1 text-sm text-slate-600 font-medium">
