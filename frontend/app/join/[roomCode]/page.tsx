@@ -124,14 +124,18 @@ export default function JoinPage({
     };
 
     // FIX 1: Ask for state on initial connect AND any auto-reconnects
+    // FIX: Add the "connect" listener and explicitly type incomingState
     client.on("connect", () => {
       client.emit(
         "participant:reconnect",
         payload,
         (ack: { ok: boolean; state?: State; error?: string }) => {
           if (ack.ok && ack.state) {
+            // Tell TypeScript explicitly that this is a complete State object
+            const incomingState = ack.state as State;
+
             setState((current) => ({
-              ...ack.state,
+              ...incomingState,
               // Preserve the answer lock if they reconnected mid-question
               alreadyAnswered: current?.alreadyAnswered ?? false,
             }));
