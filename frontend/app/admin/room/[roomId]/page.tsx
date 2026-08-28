@@ -129,6 +129,7 @@ export default function RoomPage({
     client.on("connect", () => {
       setIsEmitting(false);
       setMessage("");
+      hasAutoEndedRef.current = false;
       joinRoom();
       void load();
     });
@@ -202,6 +203,8 @@ export default function RoomPage({
 
     if (!socket || !socket.connected) {
       setMessage("⚠️ Cannot perform action while offline. Wait for reconnect.");
+      setIsEmitting(false);
+      hasAutoEndedRef.current = false;
       return;
     }
 
@@ -219,11 +222,17 @@ export default function RoomPage({
             setMessage(
               "⚠️ Network timeout. Please check your connection and try again.",
             );
+            hasAutoEndedRef.current = false;
             void load();
             return;
           }
 
-          setMessage(ack.ok ? "" : (ack.error ?? "Action failed"));
+          if (!ack.ok) {
+            setMessage(ack.error ?? "Action failed");
+            hasAutoEndedRef.current = false; 
+          } else {
+            setMessage("");
+          }
           void load();
         },
       );
