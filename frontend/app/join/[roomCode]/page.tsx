@@ -100,8 +100,14 @@ export default function JoinPage({
   useEffect(() => {
     if (!participant) return;
 
+    // Added identical robust network settings as the admin page
     const client = io(SOCKET_URL, {
       transports: ["websocket"],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
     });
 
     const payload = {
@@ -111,18 +117,24 @@ export default function JoinPage({
     };
 
     client.on("connect", () => {
+      setMessage("");
       client.emit(
         "participant:reconnect",
         payload,
         (ack: { ok: boolean; state?: State; error?: string }) => {
           if (ack.ok && ack.state) {
-            // FIX: Explicitly cast to satisfy TypeScript / Vercel
             const incomingState = ack.state as State;
 
-            setState((current) => ({
-              ...incomingState,
-              alreadyAnswered: current?.alreadyAnswered ?? false,
-            }));
+            setState((current) => {
+              // FIX: Only keep alreadyAnswered as true if we are still on the EXACT same question
+              const isSameQuestion =
+                current?.currentQuestion?.id === incomingState.currentQuestion?.id;
+                
+              return {
+                ...incomingState,
+                alreadyAnswered: isSameQuestion ? (current?.alreadyAnswered ?? false) : false,
+              };
+            });
           }
 
           if (!ack.ok) {
@@ -132,12 +144,34 @@ export default function JoinPage({
       );
     });
 
+    client.on("disconnect", () => {
+      setMessage("⚠️ You are currently offline. Reconnecting...");
+    });
+
+    client.io.on("reconnect_failed", () => {
+      setMessage("⚠️ Network lost. Waiting for connection...");
+    });
+
+    // Auto-recovery for mobile devices waking up / network returning
+    const handleOnline = () => {
+      if (client.disconnected) {
+        setMessage("🌐 Network restored! Joining...");
+        client.connect();
+      }
+    };
+    window.addEventListener("online", handleOnline);
+
     client.on("room:state", (newState: State) => {
-      setState((current) =>
-        current
-          ? { ...newState, alreadyAnswered: current.alreadyAnswered }
-          : { ...newState, alreadyAnswered: false },
-      );
+      setState((current) => {
+        // FIX: Also check here in case a state broadcast happens right after a drop
+        const isSameQuestion =
+          current?.currentQuestion?.id === newState.currentQuestion?.id;
+          
+        return {
+          ...newState,
+          alreadyAnswered: isSameQuestion ? (current?.alreadyAnswered ?? false) : false,
+        };
+      });
     });
 
     client.on("question:start", (newState: State) => {
@@ -203,6 +237,7 @@ export default function JoinPage({
     setSocket(client);
 
     return () => {
+      window.removeEventListener("online", handleOnline);
       client.close();
     };
   }, [participant, roomCode]);
