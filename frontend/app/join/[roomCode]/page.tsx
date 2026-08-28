@@ -54,15 +54,13 @@ export default function JoinPage({
   const { roomCode: rawRoomCode } = use(params);
   const roomCode = rawRoomCode.toUpperCase();
 
-  // 1. Added Age, Gender, and Community Code state
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [age, setAge] = useState("");
   const [gender, setGender] = useState("");
   const [hasJoinedWa, setHasJoinedWa] = useState(false);
   const [communityCode, setCommunityCode] = useState("");
-
-  // 3. State to track if the 2-hour token/cookie is active
+  
   const [isOnCooldown, setIsOnCooldown] = useState(false);
 
   const [participant, setParticipant] = useState<{
@@ -79,9 +77,6 @@ export default function JoinPage({
   const [quoteIndex, setQuoteIndex] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
 
-  // ---------------------------------------------------------
-  // CHECK COOLDOWN (2hr replay prevention)
-  // ---------------------------------------------------------
   useEffect(() => {
     if (typeof document !== "undefined") {
       if (document.cookie.includes("quiz_cooldown=true")) {
@@ -89,10 +84,6 @@ export default function JoinPage({
       }
     }
   }, []);
-
-  // ---------------------------------------------------------
-  // RESTORE PARTICIPANT
-  // ---------------------------------------------------------
 
   useEffect(() => {
     const saved = localStorage.getItem(participantKey(roomCode));
@@ -105,10 +96,6 @@ export default function JoinPage({
       localStorage.removeItem(participantKey(roomCode));
     }
   }, [roomCode]);
-
-  // ---------------------------------------------------------
-  // SOCKET CONNECTION
-  // ---------------------------------------------------------
 
   useEffect(() => {
     if (!participant) return;
@@ -123,20 +110,21 @@ export default function JoinPage({
       sessionId: participant.sessionId,
     };
 
-    // FIX 1: Ask for state on initial connect AND any auto-reconnects
-    // FIX: Add the "connect" listener and explicitly type incomingState
     client.on("connect", () => {
       client.emit(
         "participant:reconnect",
         payload,
-        (ack: { ok: boolean; state?: State; error?: string }) => {
+        (ack: {
+          ok: boolean;
+          state?: State;
+          error?: string;
+        }) => {
           if (ack.ok && ack.state) {
-            // Tell TypeScript explicitly that this is a complete State object
+            // FIX: Explicitly cast to satisfy TypeScript / Vercel
             const incomingState = ack.state as State;
-
+            
             setState((current) => ({
               ...incomingState,
-              // Preserve the answer lock if they reconnected mid-question
               alreadyAnswered: current?.alreadyAnswered ?? false,
             }));
           }
@@ -144,16 +132,15 @@ export default function JoinPage({
           if (!ack.ok) {
             setMessage(ack.error ?? "Reconnect failed");
           }
-        },
+        }
       );
     });
 
     client.on("room:state", (newState: State) => {
-      // FIX 2: Prevent participant count updates from accidentally unlocking the buttons
       setState((current) =>
         current
           ? { ...newState, alreadyAnswered: current.alreadyAnswered }
-          : { ...newState, alreadyAnswered: false },
+          : { ...newState, alreadyAnswered: false }
       );
     });
 
@@ -170,21 +157,17 @@ export default function JoinPage({
     });
 
     client.on("question:end", () => {
-      // FIX 3: Explicitly lock the UI the moment the server says time is up
       setState((current) =>
-        current ? { ...current, alreadyAnswered: true } : current,
+        current ? { ...current, alreadyAnswered: true } : current
       );
     });
 
     client.on("quiz:finish", ({ leaderboard }) => {
-      // ---------------------------------------------------------
-      // APPLY 2-HOUR COOLDOWN ONCE THEY HAVE FINISHED THE QUIZ
-      // ---------------------------------------------------------
       document.cookie = "quiz_cooldown=true; max-age=7200; path=/";
       setIsOnCooldown(true);
 
       const myResult = leaderboard?.find(
-        (x: any) => x.participantId === participant.id,
+        (x: any) => x.participantId === participant.id
       );
 
       setResult({
@@ -206,7 +189,7 @@ export default function JoinPage({
               },
               alreadyAnswered: false,
             }
-          : current,
+          : current
       );
 
       fetch(`${API_URL}/api/participants/${participant.id}/result`)
@@ -228,10 +211,6 @@ export default function JoinPage({
     };
   }, [participant, roomCode]);
 
-  // ---------------------------------------------------------
-  // QUESTION TIMER
-  // ---------------------------------------------------------
-
   useEffect(() => {
     if (
       state?.room.status !== "QUESTION_ACTIVE" ||
@@ -246,10 +225,11 @@ export default function JoinPage({
         Math.max(
           0,
           Math.ceil(
-            (new Date(state.room.questionEndsAt!).getTime() - Date.now()) /
-              1000,
-          ),
-        ),
+            (new Date(state.room.questionEndsAt!).getTime() -
+              Date.now()) /
+              1000
+          )
+        )
       );
     };
 
@@ -258,10 +238,6 @@ export default function JoinPage({
 
     return () => window.clearInterval(timer);
   }, [state?.room.status, state?.room.questionEndsAt]);
-
-  // ---------------------------------------------------------
-  // WAITING SCREEN QUOTES
-  // ---------------------------------------------------------
 
   useEffect(() => {
     if (!state) return;
@@ -279,10 +255,6 @@ export default function JoinPage({
     return () => window.clearInterval(timer);
   }, [state?.room.status]);
 
-  // ---------------------------------------------------------
-  // OPTIONS
-  // ---------------------------------------------------------
-
   const options = useMemo(() => {
     const q = state?.currentQuestion;
 
@@ -295,10 +267,6 @@ export default function JoinPage({
         ]
       : [];
   }, [state?.currentQuestion]);
-
-  // ---------------------------------------------------------
-  // JOIN
-  // ---------------------------------------------------------
 
   async function join() {
     setMessage("");
@@ -314,9 +282,9 @@ export default function JoinPage({
           roomCode,
           name,
           phone,
-          age: Number(age), // Added age
-          gender, // Added gender
-          communityCode, // Added unique code
+          age: Number(age),         
+          gender,                   
+          communityCode,            
           sessionId,
         }),
       });
@@ -332,7 +300,7 @@ export default function JoinPage({
           errString.includes("p2002")
         ) {
           return setMessage(
-            "You have already joined or played this quiz with this WhatsApp number!",
+            "You have already joined or played this quiz with this WhatsApp number!"
           );
         }
 
@@ -345,7 +313,10 @@ export default function JoinPage({
         sessionId,
       };
 
-      localStorage.setItem(participantKey(roomCode), JSON.stringify(saved));
+      localStorage.setItem(
+        participantKey(roomCode),
+        JSON.stringify(saved)
+      );
 
       setParticipant(saved);
       setState({
@@ -356,10 +327,6 @@ export default function JoinPage({
       setMessage("Network error. Please try again.");
     }
   }
-
-  // ---------------------------------------------------------
-  // ANSWER
-  // ---------------------------------------------------------
 
   function answer(selectedOption: string) {
     if (
@@ -393,19 +360,15 @@ export default function JoinPage({
                 ...current,
                 alreadyAnswered: true,
               }
-            : current,
+            : current
         );
 
         requestAnimationFrame(() => {
           (document.activeElement as HTMLElement | null)?.blur();
         });
-      },
+      }
     );
   }
-
-  // ---------------------------------------------------------
-  // JOIN SCREEN
-  // ---------------------------------------------------------
 
   if (!participant) {
     return (
@@ -457,9 +420,7 @@ export default function JoinPage({
 
           <div className="mt-5 grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-bold text-slate-800">
-                Age
-              </label>
+              <label className="block text-sm font-bold text-slate-800">Age</label>
               <input
                 type="number"
                 className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
@@ -471,17 +432,13 @@ export default function JoinPage({
               />
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-800">
-                Gender
-              </label>
+              <label className="block text-sm font-bold text-slate-800">Gender</label>
               <select
                 className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
                 value={gender}
                 onChange={(e) => setGender(e.target.value)}
               >
-                <option value="" disabled>
-                  Select
-                </option>
+                <option value="" disabled>Select</option>
                 <option value="Male">Male</option>
                 <option value="Female">Female</option>
                 <option value="Other">Other</option>
@@ -515,7 +472,6 @@ export default function JoinPage({
               </span>
             </label>
 
-            {/* Unique Code Block */}
             <div className="mt-4 border-t border-emerald-200 pt-4">
               <label className="flex flex-col gap-2">
                 <span className="text-sm font-bold text-emerald-900">
@@ -532,13 +488,11 @@ export default function JoinPage({
             </div>
           </div>
 
-          {/* Conditional rendering for 2hr cooldown block */}
           {isOnCooldown ? (
             <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-center shadow-sm">
               <p className="font-bold text-amber-900">Cooldown Active ⏳</p>
               <p className="mt-1 text-sm font-medium text-amber-800">
-                You have already completed the quiz. Please wait 2 hours before
-                playing again.
+                You have already completed the quiz. Please wait 2 hours before playing again.
               </p>
             </div>
           ) : (
@@ -568,10 +522,6 @@ export default function JoinPage({
     );
   }
 
-  // ---------------------------------------------------------
-  // LOADING
-  // ---------------------------------------------------------
-
   if (!state) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
@@ -584,10 +534,6 @@ export default function JoinPage({
       </main>
     );
   }
-
-  // ---------------------------------------------------------
-  // ACTIVE QUESTION
-  // ---------------------------------------------------------
 
   if (state.room.status === "QUESTION_ACTIVE" && state.currentQuestion) {
     return (
@@ -617,10 +563,9 @@ export default function JoinPage({
               <button
                 key={`${state.currentQuestion!.id}-${key}`}
                 type="button"
-                // FIX 4: Hard-lock the button if time hits 0 or room status isn't active
                 disabled={
-                  state.alreadyAnswered ||
-                  secondsLeft === 0 ||
+                  state.alreadyAnswered || 
+                  secondsLeft === 0 || 
                   state.room.status !== "QUESTION_ACTIVE"
                 }
                 onClick={() => answer(key)}
@@ -652,10 +597,6 @@ export default function JoinPage({
       </main>
     );
   }
-
-  // ---------------------------------------------------------
-  // FINISHED SCREEN
-  // ---------------------------------------------------------
 
   if (state.room.status === "FINISHED") {
     const rank = result?.rank;
@@ -729,10 +670,6 @@ export default function JoinPage({
     );
   }
 
-  // ---------------------------------------------------------
-  // WAITING SCREEN
-  // ---------------------------------------------------------
-
   return (
     <main className="min-h-screen bg-gradient-to-b from-emerald-50 via-white to-slate-50 px-4 py-8">
       <section className="mx-auto max-w-md">
@@ -748,7 +685,9 @@ export default function JoinPage({
           </h1>
           <p className="mt-2 text-slate-600">
             Welcome,{" "}
-            <span className="font-bold text-slate-900">{participant.name}</span>
+            <span className="font-bold text-slate-900">
+              {participant.name}
+            </span>
           </p>
         </div>
 
