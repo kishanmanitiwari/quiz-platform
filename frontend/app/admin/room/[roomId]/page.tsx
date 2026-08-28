@@ -204,7 +204,7 @@ export default function RoomPage({
     if (!socket || !socket.connected) {
       setMessage("⚠️ Cannot perform action while offline. Wait for reconnect.");
       setIsEmitting(false);
-      hasAutoEndedRef.current = false;
+      // Removed hasAutoEndedRef.current = false from here to prevent infinite loop
       return;
     }
 
@@ -229,7 +229,7 @@ export default function RoomPage({
 
           if (!ack.ok) {
             setMessage(ack.error ?? "Action failed");
-            hasAutoEndedRef.current = false; 
+            hasAutoEndedRef.current = false;
           } else {
             setMessage("");
           }
@@ -436,20 +436,23 @@ export default function RoomPage({
                       className={`focus-ring inline-flex items-center gap-2 rounded-md px-5 py-3 font-bold transition-colors shadow-sm disabled:cursor-not-allowed ${
                         secondsLeft > 0
                           ? "border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-                          : "bg-slate-200 text-slate-500"
+                          : "bg-slate-200 text-slate-800 hover:bg-slate-300 disabled:opacity-50"
                       }`}
                       onClick={() => emit("question:end")}
-                      disabled={secondsLeft === 0 || isEmitting}
+                      disabled={isEmitting}
                       title="Reveal answers and leaderboard"
                     >
-                      {secondsLeft === 0 || isEmitting ? (
+                      {isEmitting ? (
                         <>
                           <Loader2 size={18} className="animate-spin" />{" "}
                           Fetching Results...
                         </>
                       ) : (
                         <>
-                          <FastForward size={18} /> Skip Remaining Time
+                          <FastForward size={18} />{" "}
+                          {secondsLeft > 0
+                            ? "Skip Remaining Time"
+                            : "End Question"}
                         </>
                       )}
                     </button>
