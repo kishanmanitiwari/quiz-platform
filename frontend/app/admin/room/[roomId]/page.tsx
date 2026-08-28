@@ -102,7 +102,7 @@ export default function RoomPage({
 
   useEffect(() => {
     const client = io(SOCKET_URL, {
-      transports: ["websocket"],
+      transports: ["websocket", "polling"],
       auth: { token: localStorage.getItem("admin_token") },
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -115,23 +115,43 @@ export default function RoomPage({
         { roomId },
         (ack: { ok: boolean; state?: PublicState; error?: string }) => {
           if (ack.ok && ack.state) {
-            const incomingState = ack.state as PublicState;
-            setState(incomingState);
-            setMessage("");
+            if (ack.state.room) {
+              setState(ack.state);
+              setMessage("");
+            }
           }
           if (!ack.ok) setMessage(ack.error ?? "Socket join failed");
         },
       );
     };
 
-    client.on("connect", joinRoom);
+    client.on("connect", () => {
+      setIsEmitting(false);
+      setMessage("");
+      joinRoom();
+      void load();
+    });
 
     client.on("disconnect", () => {
+      // Never leave action buttons/spinners locked while offline.
+      setIsEmitting(false);
       setMessage("⚠️ You are currently offline. Attempting to reconnect...");
     });
 
-    client.on("room:state", setState);
-    client.on("question:start", setState);
+    client.on("connect_error", () => {
+      setIsEmitting(false);
+      setMessage("⚠️ Unable to connect. Retrying automatically...");
+    });
+
+    client.on("room:state", (incomingState: PublicState) => {
+      if (!incomingState?.room) return;
+      setState(incomingState);
+    });
+
+    client.on("question:start", (incomingState: PublicState) => {
+      if (!incomingState?.room) return;
+      setState(incomingState);
+    });
     client.on("leaderboard:update", (leaderboard) =>
       setData((current) => (current ? { ...current, leaderboard } : current)),
     );
@@ -166,21 +186,28 @@ export default function RoomPage({
     setIsEmitting(true);
 
     // FIX: Add 5000ms timeout to emit
-    socket.timeout(5000).emit(
-      name, 
-      { roomId }, 
-      (err: Error | null, ack: { ok: boolean; error?: string }) => {
-        setIsEmitting(false);
-        
-        if (err) {
-          setMessage("⚠️ Network timeout. Please check your connection and try again.");
-          return;
-        }
+    socket
+      .timeout(5000)
+      .emit(
+        name,
+        { roomId },
+        (err: Error | null, ack: { ok: boolean; error?: string }) => {
+          setIsEmitting(false);
 
-        setMessage(ack.ok ? "" : (ack.error ?? "Action failed"));
-        void load();
-      }
-    );
+          if (err) {
+            setMessage(
+              "⚠️ Network timeout. Please check your connection and try again.",
+            );
+            // Refresh from the API in case the server processed the action
+            // even though the socket acknowledgement was lost.
+            void load();
+            return;
+          }
+
+          setMessage(ack.ok ? "" : (ack.error ?? "Action failed"));
+          void load();
+        },
+      );
   }
 
   useEffect(() => {
@@ -248,12 +275,15 @@ export default function RoomPage({
           ok: boolean;
           error?: string;
           leaderboard?: RoomPayload["leaderboard"];
-        }
+        },
       ) => {
         setIsEmitting(false);
-        
+
         if (err) {
-          setMessage("⚠️ Network timeout. Please check your connection and try again.");
+          setMessage(
+            "⚠️ Network timeout. Please check your connection and try again.",
+          );
+          void load();
           return;
         }
 
@@ -273,7 +303,7 @@ export default function RoomPage({
     if (isEmitting) return;
     setIsEmitting(true);
     setMessage("Preparing CSV...");
-    
+
     try {
       const token = localStorage.getItem("admin_token");
       const res = await fetch(`${API_URL}/api/admin/rooms/${roomId}/export`, {
@@ -285,14 +315,14 @@ export default function RoomPage({
       if (!res.ok) throw new Error("Export failed");
 
       const blob = await res.blob();
-      
+
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `iskcon-quiz-${data?.room.roomCode}.csv`;
       document.body.appendChild(a);
       a.click();
-      
+
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
       setMessage("");
@@ -469,7 +499,6 @@ export default function RoomPage({
 
         {roomState === "FINISHED" ? (
           <div className="mt-12 text-center">
-            
             {/* CSV Download Button */}
             <div className="mb-8 flex justify-center">
               <button
@@ -477,7 +506,11 @@ export default function RoomPage({
                 disabled={isEmitting}
                 className="focus-ring inline-flex items-center gap-2 rounded-xl bg-slate-900 px-6 py-4 font-bold text-white shadow-md transition-all hover:-translate-y-0.5 hover:shadow-lg disabled:opacity-50"
               >
-                {isEmitting ? <Loader2 size={20} className="animate-spin" /> : <Download size={20} />}
+                {isEmitting ? (
+                  <Loader2 size={20} className="animate-spin" />
+                ) : (
+                  <Download size={20} />
+                )}
                 Download Event Data (CSV)
               </button>
             </div>
