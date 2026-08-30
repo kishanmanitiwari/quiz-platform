@@ -486,7 +486,7 @@ export default function JoinPage({
             </p>
 
             <a
-              href="https://chat.whatsapp.com/YOUR_INVITE_LINK_HERE"
+              href="https://chat.whatsapp.com/ELe907m0c29Fjl7iOrZcm"
               target="_blank"
               rel="noopener noreferrer"
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3.5 font-bold text-white shadow-sm transition hover:opacity-90"
