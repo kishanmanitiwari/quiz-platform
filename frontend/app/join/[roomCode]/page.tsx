@@ -438,7 +438,7 @@ export default function JoinPage({
               type="tel"
               inputMode="numeric"
               className={`focus-ring mt-2 w-full rounded-xl border bg-white px-4 py-3.5 outline-none transition ${
-                phoneTouched && phone.length > 0 && phone.length < 9
+                phoneTouched && phone.length > 0 && phone.length < 10
                   ? "border-red-300 focus:border-red-500"
                   : "border-slate-300 focus:border-leaf"
               }`}
@@ -455,7 +455,7 @@ export default function JoinPage({
               }}
               placeholder="10-digit WhatsApp number"
             />
-            {phoneTouched && phone.length > 0 && phone.length < 9 && (
+            {phoneTouched && phone.length > 0 && phone.length < 10 && (
               <p className="mt-2 text-xs font-medium text-red-600">
                 Enter a valid 10-digit WhatsApp number to continue.
               </p>
@@ -543,7 +543,7 @@ export default function JoinPage({
                 !age ||
                 !gender ||
                 !communityCode.trim() ||
-                phone.length < 9
+                phone.length < 10
               }
               onClick={join}
             >
