@@ -58,7 +58,6 @@ export default function JoinPage({
   const [phone, setPhone] = useState("");
   const [age, setAge] = useState("");
   const [gender, setGender] = useState("");
-  const [hasJoinedWa, setHasJoinedWa] = useState(false);
   const [communityCode, setCommunityCode] = useState("");
 
   const [isOnCooldown, setIsOnCooldown] = useState(false);
@@ -73,6 +72,7 @@ export default function JoinPage({
   const [socket, setSocket] = useState<Socket | null>(null);
   const [message, setMessage] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [phoneTouched, setPhoneTouched] = useState(false);
 
   const [quoteIndex, setQuoteIndex] = useState(0);
   const [result, setResult] = useState<Result | null>(null);
@@ -437,13 +437,29 @@ export default function JoinPage({
             <input
               type="tel"
               inputMode="numeric"
-              className="focus-ring mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 outline-none transition focus:border-leaf"
+              className={`focus-ring mt-2 w-full rounded-xl border bg-white px-4 py-3.5 outline-none transition ${
+                phoneTouched && phone.length > 0 && phone.length < 9
+                  ? "border-red-300 focus:border-red-500"
+                  : "border-slate-300 focus:border-leaf"
+              }`}
               value={phone}
-              onChange={(e) =>
-                setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
-              }
+              onBlur={() => setPhoneTouched(true)}
+              onChange={(e) => {
+                const nextPhone = e.target.value
+                  .replace(/\D/g, "")
+                  .slice(0, 10);
+                setPhone(nextPhone);
+                if (nextPhone.length > 0) {
+                  setPhoneTouched(true);
+                }
+              }}
               placeholder="10-digit WhatsApp number"
             />
+            {phoneTouched && phone.length > 0 && phone.length < 9 && (
+              <p className="mt-2 text-xs font-medium text-red-600">
+                Enter a valid 10-digit WhatsApp number to continue.
+              </p>
+            )}
           </div>
 
           <div className="mt-5 grid grid-cols-2 gap-4">
@@ -482,7 +498,7 @@ export default function JoinPage({
 
           <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
             <p className="mb-3 text-center text-sm font-bold text-emerald-900">
-              Join the community to play
+              Join the ISKCON WhatsApp community to get the quiz code
             </p>
 
             <a
@@ -491,32 +507,20 @@ export default function JoinPage({
               rel="noopener noreferrer"
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3.5 font-bold text-white shadow-sm transition hover:opacity-90"
             >
-              💬 Step 1: Join WhatsApp Group
+              💬 Step 1: Join ISKCON WhatsApp Community
             </a>
-
-            <label className="mt-4 flex cursor-pointer items-start gap-3">
-              <input
-                type="checkbox"
-                className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
-                checked={hasJoinedWa}
-                onChange={(e) => setHasJoinedWa(e.target.checked)}
-              />
-              <span className="text-sm font-semibold leading-relaxed text-slate-800">
-                Step 2: I confirm I have joined the ISKCON WhatsApp Community.
-              </span>
-            </label>
 
             <div className="mt-4 border-t border-emerald-200 pt-4">
               <label className="flex flex-col gap-2">
                 <span className="text-sm font-bold text-emerald-900">
-                  Step 3: Enter Community Code
+                  Step 2: Enter quiz code from the community post
                 </span>
                 <input
                   type="text"
                   className="focus-ring w-full rounded-xl border border-emerald-300 bg-white px-4 py-3 outline-none transition focus:border-emerald-600"
                   value={communityCode}
                   onChange={(e) => setCommunityCode(e.target.value)}
-                  placeholder="Code from community description"
+                  placeholder="Enter quiz code"
                 />
               </label>
             </div>
@@ -539,7 +543,7 @@ export default function JoinPage({
                 !age ||
                 !gender ||
                 !communityCode.trim() ||
-                !hasJoinedWa
+                phone.length < 9
               }
               onClick={join}
             >
