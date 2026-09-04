@@ -280,17 +280,16 @@ export default function RoomPage({
       const questionEndsAt =
         state?.room.questionEndsAt ?? data?.room.questionEndsAt;
       if (!questionEndsAt) return setSecondsLeft(0);
-
-      const rawRemaining =
-        (new Date(questionEndsAt).getTime() - Date.now()) / 1000;
-
-      // 🔒 Strictly locked to 20 seconds max limit
-      const maxLimit = 20;
-
-      setSecondsLeft(Math.max(0, Math.min(maxLimit, Math.ceil(rawRemaining))));
+      setSecondsLeft(
+        Math.max(
+          0,
+          Math.ceil((new Date(questionEndsAt).getTime() - Date.now()) / 1000),
+        ),
+      );
     }, 250);
     return () => window.clearInterval(timer);
   }, [data?.room.questionEndsAt, state?.room.questionEndsAt]);
+
   const roomState = state?.room.status ?? data?.room.status ?? "WAITING";
   const questionEndsAt =
     state?.room.questionEndsAt ?? data?.room.questionEndsAt;
