@@ -12,6 +12,7 @@ import { participantAuthSchema, submitAnswerSchema } from "./validation.js";
 import { verifyAdminToken } from "./auth.js";
 
 const socketRoom = (roomCode: string) => `quiz-room-${roomCode.toUpperCase()}`;
+const QUESTION_TIME_LIMIT_SECONDS = 20;
 
 export function createSocketServer(server: Server) {
   const io = new SocketIOServer(server, {
@@ -132,7 +133,7 @@ export function createSocketServer(server: Server) {
         return callback?.({ ok: false, error: "No more questions" });
       const startedAt = new Date();
       const endsAt = new Date(
-        startedAt.getTime() + nextQuestion.timeLimit * 1000,
+        startedAt.getTime() + QUESTION_TIME_LIMIT_SECONDS * 1000,
       );
       await prisma.room.update({
         where: { id: room.id },
@@ -200,7 +201,7 @@ export function createSocketServer(server: Server) {
           isCorrect,
           basePoints: question.basePoints,
           responseTimeMs: responseTime,
-          timeLimitSeconds: question.timeLimit,
+          timeLimitSeconds: QUESTION_TIME_LIMIT_SECONDS,
         });
         const answer = await prisma.answer.create({
           data: {

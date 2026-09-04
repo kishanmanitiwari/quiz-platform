@@ -254,15 +254,13 @@ export default function QuizPage({
 
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-1.5">
-                Time Limit (Seconds)
+                Time Limit
               </label>
               <input
                 className="focus-ring w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-slate-900 outline-none focus:border-leaf font-semibold"
                 type="number"
-                value={form.timeLimit}
-                onChange={(e) =>
-                  setForm({ ...form, timeLimit: Number(e.target.value) })
-                }
+                value={20}
+                readOnly
               />
             </div>
 
