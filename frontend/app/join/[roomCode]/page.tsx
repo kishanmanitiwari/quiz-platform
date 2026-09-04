@@ -253,15 +253,18 @@ export default function JoinPage({
     }
 
     const updateTimer = () => {
-      setSecondsLeft(
-        Math.max(
-          0,
-          Math.ceil(
-            (new Date(state.room.questionEndsAt!).getTime() - Date.now()) /
-              1000,
-          ),
-        ),
-      );
+      if (!state?.room.questionEndsAt) {
+        setSecondsLeft(0);
+        return;
+      }
+
+      const endsAtMs = new Date(state.room.questionEndsAt).getTime();
+      const rawRemaining = (endsAtMs - Date.now()) / 1000;
+
+      // 🔒 Fixed to 20 seconds
+      const maxLimit = 20;
+
+      setSecondsLeft(Math.max(0, Math.min(maxLimit, Math.ceil(rawRemaining))));
     };
 
     updateTimer();
