@@ -59,6 +59,22 @@ type PublicState = {
   currentQuestion: { order: number; text: string } | null;
 };
 
+type Tab = "quiz" | "gitasar" | "team";
+
+const TEAM_IMAGES = [
+  "/Team 09.21.01 (1).jpeg",
+  "/Team 09.21.01.jpeg",
+  "/Team 15.32.50.jpeg",
+  "/Team 15.34.29 (2).jpeg",
+  "/Team 15.34.29 (3).jpeg",
+  "/Team 15.45.15 (2).jpeg",
+  "/Team 15.45.18.jpeg",
+  "/Team 15.57.08 (1).jpeg",
+  "/Team 15.57.08 (3).jpeg",
+  "/Team 15.57.09 (1).jpeg",
+  "/Team 15.58.18.jpeg",
+];
+
 export default function RoomPage({
   params,
 }: {
@@ -74,6 +90,28 @@ export default function RoomPage({
 
   const [isEmitting, setIsEmitting] = useState(false);
   const hasAutoEndedRef = useRef(false);
+
+  // Dashboard Tab State (Manual Mode)
+  const [activeTab, setActiveTab] = useState<Tab>("quiz");
+  const [teamImageIndex, setTeamImageIndex] = useState(0);
+
+  const dashboardTabs: { id: Tab; label: string; icon: string }[] = [
+    { id: "quiz", label: "Free Quiz", icon: "🔥" },
+    { id: "gitasar", label: "Gitasar Course", icon: "📖" },
+    { id: "team", label: "The Team", icon: "👥" },
+  ];
+
+  useEffect(() => {
+    if (activeTab !== "team") return;
+
+    const interval = window.setInterval(() => {
+      setTeamImageIndex(
+        (currentIndex) => (currentIndex + 1) % TEAM_IMAGES.length,
+      );
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+  }, [activeTab]);
 
   const joinUrl = useMemo(() => {
     if (!data) return "";
@@ -96,7 +134,7 @@ export default function RoomPage({
 
   useEffect(() => {
     if (!data) return;
-    QRCode.toDataURL(joinUrl, { width: 360, margin: 1 }).then(setQr);
+    QRCode.toDataURL(joinUrl, { width: 1000, margin: 1 }).then(setQr);
   }, [data, joinUrl]);
 
   useEffect(() => {
@@ -204,7 +242,6 @@ export default function RoomPage({
     if (!socket || !socket.connected) {
       setMessage("⚠️ Cannot perform action while offline. Wait for reconnect.");
       setIsEmitting(false);
-      // Removed hasAutoEndedRef.current = false from here to prevent infinite loop
       return;
     }
 
@@ -393,17 +430,21 @@ export default function RoomPage({
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8">
-      <section className="mx-auto max-w-7xl">
+      {/* Container scales up to full width purely for the Waiting screen */}
+      <section
+        className={`mx-auto ${roomState === "WAITING" ? "w-full max-w-[1920px]" : "max-w-7xl"}`}
+      >
+        {/* TOP ADMIN HEADER */}
         <Link
           href={`/admin/quiz/${data.room.quiz.id}`}
           className="text-sm font-semibold text-leaf hover:underline"
         >
           &larr; Back to quiz
         </Link>
-        <div className="mt-3 flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+        <div className="mt-3 mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold">
+              <h1 className="text-3xl font-bold text-slate-900">
                 QuizSession {data.room.roomCode}
               </h1>
               {getStatusBadge(roomState)}
@@ -411,11 +452,6 @@ export default function RoomPage({
             <p className="mt-1 text-sm text-slate-600 font-medium">
               {data.room.quiz.title}
             </p>
-            {roomState === "WAITING" && (
-              <p className="mt-2 break-all text-sm text-slate-500 bg-slate-200 inline-block px-3 py-1 rounded-md">
-                {joinUrl}
-              </p>
-            )}
           </div>
 
           {roomState !== "FINISHED" && (
@@ -493,11 +529,12 @@ export default function RoomPage({
         </div>
 
         {message && (
-          <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+          <div className="mt-4 mb-6 rounded-md border border-amber-200 bg-amber-50 p-3">
             <p className="text-sm font-semibold text-amber-900">{message}</p>
           </div>
         )}
 
+        {/* STATE RENDERERS */}
         {roomState === "FINISHED" ? (
           <div className="mt-12 text-center">
             {winner ? (
@@ -594,45 +631,155 @@ export default function RoomPage({
         ) : (
           <>
             {roomState === "WAITING" ? (
-              <div className="mt-8 grid gap-6 lg:grid-cols-[360px_1fr]">
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h2 className="text-center font-bold text-slate-800 text-lg mb-4">
-                    Join the Game!
-                  </h2>
-                  {qr && (
-                    <img
-                      src={qr}
-                      alt={`QR code for ${joinUrl}`}
-                      className="mx-auto h-auto w-full max-w-[320px] rounded-lg border-4 border-slate-100"
-                    />
-                  )}
-                  <button
-                    className="focus-ring mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-white px-4 py-3 font-semibold text-ink ring-1 ring-slate-300 hover:bg-slate-50 transition-colors"
-                    onClick={() => qr && window.open(qr, "_blank")}
-                  >
-                    <Maximize2 size={18} /> Fullscreen QR
-                  </button>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                  <h2 className="text-xl font-bold mb-6 border-b pb-4">
-                    Participants ({participants.length})
-                  </h2>
-                  <div className="flex flex-wrap gap-2">
-                    {participants.map((p) => (
-                      <p
-                        key={p.id}
-                        className="rounded-full bg-slate-100 px-4 py-2 font-semibold text-slate-700 border border-slate-200"
-                      >
-                        {p.name}
+              /* =========================================
+                 OPTIMIZED WIDESCREEN DASHBOARD (4-6-2 Grid)
+                 ========================================= */
+              <div className="flex flex-col rounded-[2rem] bg-white border border-slate-200 p-6 font-sans shadow-xl min-h-[750px] max-h-[85vh]">
+                {/* Navigation Bar */}
+                <header className="mb-6 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-center gap-4 pl-2">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-2xl">
+                      🙏
+                    </div>
+                    <div>
+                      <h1 className="text-xl font-black tracking-tight text-slate-900">
+                        ISKCON STALL
+                      </h1>
+                      <p className="text-xs font-semibold tracking-widest text-amber-600">
+                        PLAY • LEARN • GROW
                       </p>
-                    ))}
-                    {participants.length === 0 && (
-                      <p className="text-slate-500 italic mt-4 w-full text-center">
-                        Waiting for players to scan and join...
-                      </p>
-                    )}
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-800 shadow-sm">
+                      🍽️ Fast Prasadam for Winners
+                    </div>
                   </div>
+
+                  <nav className="flex gap-2 pr-2">
+                    {dashboardTabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={`flex items-center gap-2 rounded-xl px-6 py-3 font-bold transition-all duration-300 ${
+                          activeTab === tab.id
+                            ? "bg-amber-500 text-white shadow-md"
+                            : "bg-transparent text-slate-500 hover:bg-slate-200 hover:text-slate-900"
+                        }`}
+                      >
+                        <span>{tab.icon}</span>
+                        {tab.label}
+                      </button>
+                    ))}
+                  </nav>
+                </header>
+
+                {/* 12-Column Grid */}
+                <div className="grid flex-1 grid-cols-12 gap-6 min-h-0">
+                  {/* Left Column: Huge QR Code (Spans 4 cols) */}
+                  <aside className="col-span-4 flex h-full flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm">
+                    <h2 className="mb-4 text-3xl font-black uppercase tracking-widest text-amber-600 animate-pulse">
+                      Scan to Join
+                    </h2>
+                    <div className="flex aspect-square w-full max-w-[480px] items-center justify-center overflow-hidden rounded-2xl border-4 border-slate-100 bg-white p-2">
+                      {qr ? (
+                        <img
+                          src={qr}
+                          alt="QR Code"
+                          className="h-full w-full object-contain mix-blend-multiply"
+                        />
+                      ) : (
+                        <div className="h-full w-full animate-pulse bg-slate-100 rounded-lg"></div>
+                      )}
+                    </div>
+                  </aside>
+
+                  {/* Middle Column: Active Tab Image (Spans 6 cols) */}
+                  <main className="col-span-6 rounded-2xl border border-slate-200 bg-slate-100/50 p-6 flex items-center justify-center overflow-hidden relative h-full">
+                    {activeTab === "quiz" && (
+                      <div
+                        key="quiz"
+                        className="animate-in fade-in zoom-in-95 flex h-full w-full items-center justify-center duration-500"
+                      >
+                        <div className="h-full w-full overflow-hidden rounded-3xl border border-slate-200 bg-white p-2 shadow-xl">
+                          <img
+                            src="/free-quiz.jpg"
+                            alt="Free Quiz"
+                            className="h-full w-full rounded-2xl object-cover"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {activeTab === "gitasar" && (
+                      <div
+                        key="gitasar"
+                        className="animate-in fade-in zoom-in-95 flex h-full w-full items-center justify-center duration-500"
+                      >
+                        <div className="flex h-full max-h-full max-w-full items-center justify-center rounded-3xl border border-slate-200 bg-white p-2 shadow-[0_12px_28px_rgba(15,23,42,0.16)]">
+                          <img
+                            src="/gitasar.jpg"
+                            alt="Gitasar Course pamphlet"
+                            className="h-full max-h-full w-auto max-w-full rounded-2xl object-contain"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {activeTab === "team" && (
+                      <div
+                        key="team"
+                        className="animate-in fade-in zoom-in-95 duration-500 w-full h-full flex flex-col items-center justify-center text-center"
+                      >
+                        <h2 className="mb-4 text-4xl font-black text-amber-600 drop-shadow-sm">
+                          Meet the Team
+                        </h2>
+                        <div className="w-full max-w-3xl rounded-3xl border border-slate-200 bg-white p-3 shadow-xl">
+                          <img
+                            key={TEAM_IMAGES[teamImageIndex]}
+                            src={TEAM_IMAGES[teamImageIndex]}
+                            alt="ISKCON team"
+                            className="h-[500px] w-full animate-in rounded-2xl object-cover fade-in duration-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </main>
+
+                  {/* Right Column: Narrower Participant List (Spans 2 cols) */}
+                  <aside className="col-span-2 flex flex-col rounded-2xl border border-slate-200 bg-slate-50 p-4 h-full">
+                    <div className="mb-4 flex items-center justify-between">
+                      <h2 className="text-xs font-black tracking-widest text-amber-600">
+                        JOINED
+                      </h2>
+                      <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-700">
+                        {participants.length}
+                      </span>
+                    </div>
+
+                    <div className="flex-1 space-y-1.5 overflow-y-auto pr-1 custom-scrollbar">
+                      {participants.length === 0 ? (
+                        <p className="text-center text-xs font-medium italic text-slate-500 mt-6">
+                          Waiting for players...
+                        </p>
+                      ) : (
+                        participants.map((p, i) => (
+                          <div
+                            key={p.id}
+                            className="flex items-center justify-between rounded-md bg-white border border-slate-200 px-2 py-1.5 shadow-sm"
+                          >
+                            <div className="flex items-center gap-1.5 overflow-hidden">
+                              <span className="text-[10px] font-bold text-slate-400 w-4">
+                                {String(i + 1).padStart(2, "0")}
+                              </span>
+                              <span className="font-semibold text-slate-700 text-xs truncate">
+                                {p.name}
+                              </span>
+                            </div>
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 shadow-sm ml-1"></span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </aside>
                 </div>
               </div>
             ) : (
