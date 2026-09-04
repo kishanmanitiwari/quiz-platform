@@ -49,18 +49,22 @@ export default function QuizPage({
   const [message, setMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  async function load() {
+  async function load(syncQuestionCount = false) {
     const body = await apiFetch<{ quiz: Quiz }>(`/api/admin/quizzes/${quizId}`);
     setQuiz(body.quiz);
-    const count = body.quiz.totalQuestions || body.quiz.questions.length || 6;
-    setTotalQuestions(count);
+
+    if (syncQuestionCount) {
+      const count = body.quiz.totalQuestions || body.quiz.questions.length || 6;
+      setTotalQuestions(Math.max(6, count));
+    }
+
     const first =
       body.quiz.questions.find((q) => q.order === selected) ?? blank(selected);
     setForm(first);
   }
 
   useEffect(() => {
-    void load();
+    void load(true);
   }, []);
 
   useEffect(() => {
@@ -76,7 +80,7 @@ export default function QuizPage({
     try {
       await apiFetch(`/api/admin/quizzes/${quizId}/questions/${selected}`, {
         method: "PUT",
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, timeLimit: 20 }),
       });
 
       await load();

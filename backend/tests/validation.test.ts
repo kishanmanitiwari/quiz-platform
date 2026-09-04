@@ -3,7 +3,7 @@ import { cleanName, joinRoomSchema, submitAnswerSchema } from "../src/validation
 
 describe("validation", () => {
   it("accepts valid room joins and rejects invalid rooms", () => {
-    expect(joinRoomSchema.safeParse({ roomCode: "ABC123", name: "Hari", sessionId: "session-123456789" }).success).toBe(true);
+    expect(joinRoomSchema.safeParse({ roomCode: "ABC123", name: "Hari", phone: "9876543210", sessionId: "session-123456789" }).success).toBe(true);
     expect(joinRoomSchema.safeParse({ roomCode: "A", name: "Hari", sessionId: "session-123456789" }).success).toBe(false);
   });
 

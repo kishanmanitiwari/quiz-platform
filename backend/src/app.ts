@@ -44,6 +44,10 @@ function routeParam(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] : (value ?? "");
 }
 
+function hasContiguousQuestionOrders(questions: { order: number }[]) {
+  return questions.every((question, index) => question.order === index + 1);
+}
+
 app.use((helmet as any)());
 app.use(cors());
 app.use(express.json({ limit: "100kb" }));
@@ -150,14 +154,23 @@ app.post(
     if (!parsed.success)
       return res.status(400).json({ error: parsed.error.flatten() });
 
-    const questionCount = await prisma.question.count({
+    const questions = await prisma.question.findMany({
       where: { quizId: parsed.data.quizId },
+      select: { order: true },
+      orderBy: { order: "asc" },
     });
+    const questionCount = questions.length;
 
     if (questionCount < 6 || questionCount > 50)
       return res
         .status(400)
         .json({ error: "Quiz must have between 6 and 50 questions" });
+
+    if (!hasContiguousQuestionOrders(questions)) {
+      return res.status(400).json({
+        error: "Quiz questions must be numbered continuously from 1",
+      });
+    }
 
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     await prisma.room.deleteMany({

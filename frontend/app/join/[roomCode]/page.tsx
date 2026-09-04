@@ -267,7 +267,7 @@ export default function JoinPage({
           const data = await res.json();
           setResult((current) => ({
             ...current,
-            ...data,
+            ...data.result,
           }));
         })
         .catch(() => {});
@@ -356,7 +356,7 @@ export default function JoinPage({
           phone,
           age: Number(age),
           gender,
-          communityCode,
+          communityCode: communityCode.trim(),
           sessionId,
         }),
       });

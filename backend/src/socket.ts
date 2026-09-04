@@ -13,6 +13,10 @@ import { verifyAdminToken } from "./auth.js";
 
 const socketRoom = (roomCode: string) => `quiz-room-${roomCode.toUpperCase()}`;
 
+function hasContiguousQuestionOrders(questions: { order: number }[]) {
+  return questions.every((question, index) => question.order === index + 1);
+}
+
 export function createSocketServer(server: Server) {
   const io = new SocketIOServer(server, {
     cors: { origin: env.FRONTEND_URL, credentials: true },
@@ -93,13 +97,25 @@ export function createSocketServer(server: Server) {
         return callback?.({ ok: false, error: "Admin login required" });
       const room = await prisma.room.findUnique({
         where: { id: roomId },
-        include: { quiz: { include: { questions: true } } },
+        include: {
+          quiz: { include: { questions: { orderBy: { order: "asc" } } } },
+        },
       });
       if (!room) return callback?.({ ok: false, error: "Room not found" });
       if (room.status !== "WAITING")
         return callback?.({ ok: false, error: "Room is not waiting" });
-      if (room.quiz.questions.length !== 6)
-        return callback?.({ ok: false, error: "Quiz must have 6 questions" });
+      if (room.quiz.questions.length < 6 || room.quiz.questions.length > 50) {
+        return callback?.({
+          ok: false,
+          error: "Quiz must have between 6 and 50 questions",
+        });
+      }
+      if (!hasContiguousQuestionOrders(room.quiz.questions)) {
+        return callback?.({
+          ok: false,
+          error: "Quiz questions must be numbered continuously from 1",
+        });
+      }
       const updated = await prisma.room.update({
         where: { id: room.id },
         data: { status: "ACTIVE", currentQuestion: 0 },
