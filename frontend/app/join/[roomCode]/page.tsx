@@ -6,6 +6,7 @@ import { API_URL, SOCKET_URL } from "@/lib/config";
 import { getSessionId, participantKey } from "@/lib/session";
 
 type State = {
+  serverTime?: string;
   room: {
     id: string;
     roomCode: string;
@@ -46,6 +47,28 @@ const QUOTES = [
   "“The highest perfection of human life is to remember Krishna at all times.”",
 ];
 
+function getServerClockOffset(serverTime?: string | null) {
+  if (!serverTime) return 0;
+  const serverMs = new Date(serverTime).getTime();
+  return Number.isFinite(serverMs) ? serverMs - Date.now() : 0;
+}
+
+function getSecondsLeft(
+  questionEndsAt: string,
+  serverClockOffsetMs: number,
+  maxSeconds?: number,
+) {
+  const endMs = new Date(questionEndsAt).getTime();
+  const seconds = Math.max(
+    0,
+    Math.ceil((endMs - (Date.now() + serverClockOffsetMs)) / 1000),
+  );
+
+  return typeof maxSeconds === "number"
+    ? Math.min(maxSeconds, seconds)
+    : seconds;
+}
+
 export default function JoinPage({
   params,
 }: {
@@ -72,6 +95,7 @@ export default function JoinPage({
   const [socket, setSocket] = useState<Socket | null>(null);
   const [message, setMessage] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
   const [phoneTouched, setPhoneTouched] = useState(false);
 
   const [quoteIndex, setQuoteIndex] = useState(0);
@@ -123,6 +147,9 @@ export default function JoinPage({
         (ack: { ok: boolean; state?: State; error?: string }) => {
           if (ack.ok && ack.state) {
             const incomingState = ack.state as State;
+            setServerClockOffsetMs(
+              getServerClockOffset(incomingState.serverTime),
+            );
 
             setState((current) => {
               const isSameQuestion =
@@ -162,6 +189,7 @@ export default function JoinPage({
     window.addEventListener("online", handleOnline);
 
     client.on("room:state", (newState: State) => {
+      setServerClockOffsetMs(getServerClockOffset(newState.serverTime));
       setState((current) => {
         const isSameQuestion =
           current?.currentQuestion?.id === newState.currentQuestion?.id;
@@ -176,6 +204,7 @@ export default function JoinPage({
     });
 
     client.on("question:start", (newState: State) => {
+      setServerClockOffsetMs(getServerClockOffset(newState.serverTime));
       setState({
         ...newState,
         alreadyAnswered: false,
@@ -187,11 +216,20 @@ export default function JoinPage({
       });
     });
 
-    client.on("question:end", () => {
-      setState((current) =>
-        current ? { ...current, alreadyAnswered: true } : current,
-      );
-    });
+    client.on(
+      "question:end",
+      ({ room }: { room?: Partial<State["room"]> } = {}) => {
+        setState((current) =>
+          current
+            ? {
+                ...current,
+                room: room ? { ...current.room, ...room } : current.room,
+                alreadyAnswered: true,
+              }
+            : current,
+        );
+      },
+    );
 
     client.on("quiz:finish", ({ leaderboard }) => {
       document.cookie = "quiz_cooldown=true; max-age=7200; path=/";
@@ -254,12 +292,10 @@ export default function JoinPage({
 
     const updateTimer = () => {
       setSecondsLeft(
-        Math.max(
-          0,
-          Math.ceil(
-            (new Date(state.room.questionEndsAt!).getTime() - Date.now()) /
-              1000,
-          ),
+        getSecondsLeft(
+          state.room.questionEndsAt!,
+          serverClockOffsetMs,
+          state.currentQuestion?.timeLimit,
         ),
       );
     };
@@ -268,7 +304,12 @@ export default function JoinPage({
     const timer = window.setInterval(updateTimer, 500);
 
     return () => window.clearInterval(timer);
-  }, [state?.room.status, state?.room.questionEndsAt]);
+  }, [
+    state?.room.status,
+    state?.room.questionEndsAt,
+    state?.currentQuestion?.timeLimit,
+    serverClockOffsetMs,
+  ]);
 
   useEffect(() => {
     if (!state) return;
@@ -347,6 +388,7 @@ export default function JoinPage({
       localStorage.setItem(participantKey(roomCode), JSON.stringify(saved));
 
       setParticipant(saved);
+      setServerClockOffsetMs(getServerClockOffset(body.state?.serverTime));
       setState({
         ...body.state,
         alreadyAnswered: false,

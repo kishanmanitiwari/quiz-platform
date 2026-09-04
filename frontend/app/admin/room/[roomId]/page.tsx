@@ -33,6 +33,7 @@ type RoomPayload = {
         optionC: string;
         optionD: string;
         correctOption: "A" | "B" | "C" | "D";
+        timeLimit: number;
       }[];
     };
     participants: { id: string; name: string }[];
@@ -47,6 +48,7 @@ type RoomPayload = {
 };
 
 type PublicState = {
+  serverTime?: string;
   room: {
     id: string;
     roomCode: string;
@@ -56,7 +58,7 @@ type PublicState = {
     participantCount: number;
   };
   participants: { id: string; name: string }[];
-  currentQuestion: { order: number; text: string } | null;
+  currentQuestion: { order: number; text: string; timeLimit?: number } | null;
 };
 
 type Tab = "quiz" | "gitasar" | "team";
@@ -75,6 +77,32 @@ const TEAM_IMAGES = [
   "/Team 15.58.18.jpeg",
 ];
 
+function getServerClockOffset(serverTime?: string | null) {
+  if (!serverTime) return 0;
+  const serverMs = new Date(serverTime).getTime();
+  return Number.isFinite(serverMs) ? serverMs - Date.now() : 0;
+}
+
+function getCorrectedNow(serverClockOffsetMs: number) {
+  return Date.now() + serverClockOffsetMs;
+}
+
+function getSecondsLeft(
+  questionEndsAt: string,
+  serverClockOffsetMs: number,
+  maxSeconds?: number,
+) {
+  const endMs = new Date(questionEndsAt).getTime();
+  const seconds = Math.max(
+    0,
+    Math.ceil((endMs - getCorrectedNow(serverClockOffsetMs)) / 1000),
+  );
+
+  return typeof maxSeconds === "number"
+    ? Math.min(maxSeconds, seconds)
+    : seconds;
+}
+
 export default function RoomPage({
   params,
 }: {
@@ -87,6 +115,7 @@ export default function RoomPage({
   const [qr, setQr] = useState("");
   const [message, setMessage] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [serverClockOffsetMs, setServerClockOffsetMs] = useState(0);
 
   const [isEmitting, setIsEmitting] = useState(false);
   const hasAutoEndedRef = useRef(false);
@@ -155,6 +184,9 @@ export default function RoomPage({
         (ack: { ok: boolean; state?: PublicState; error?: string }) => {
           if (ack.ok && ack.state) {
             if (ack.state.room) {
+              setServerClockOffsetMs(
+                getServerClockOffset(ack.state.serverTime),
+              );
               setState(ack.state);
               setMessage("");
             }
@@ -201,11 +233,13 @@ export default function RoomPage({
 
     client.on("room:state", (incomingState: PublicState) => {
       if (!incomingState?.room) return;
+      setServerClockOffsetMs(getServerClockOffset(incomingState.serverTime));
       setState(incomingState);
     });
 
     client.on("question:start", (incomingState: PublicState) => {
       if (!incomingState?.room) return;
+      setServerClockOffsetMs(getServerClockOffset(incomingState.serverTime));
       setState(incomingState);
     });
 
@@ -213,11 +247,17 @@ export default function RoomPage({
       setData((current) => (current ? { ...current, leaderboard } : current)),
     );
 
-    client.on("question:end", ({ room, leaderboard }) => {
+    client.on("question:end", ({ room, leaderboard } = {}) => {
       setState((current) =>
-        current ? { ...current, room: { ...current.room, ...room } } : current,
+        current
+          ? { ...current, room: room ? { ...current.room, ...room } : current.room }
+          : current,
       );
-      setData((current) => (current ? { ...current, leaderboard } : current));
+      if (leaderboard) {
+        setData((current) =>
+          current ? { ...current, leaderboard } : current,
+        );
+      }
     });
 
     client.on("quiz:finish", ({ room, leaderboard }) => {
@@ -280,15 +320,29 @@ export default function RoomPage({
       const questionEndsAt =
         state?.room.questionEndsAt ?? data?.room.questionEndsAt;
       if (!questionEndsAt) return setSecondsLeft(0);
+
+      const currentQuestionNumber =
+        state?.room.currentQuestion ?? data?.room.currentQuestion;
+      const timeLimit =
+        state?.currentQuestion?.timeLimit ??
+        data?.room.quiz.questions.find(
+          (question) => question.order === currentQuestionNumber,
+        )?.timeLimit;
+
       setSecondsLeft(
-        Math.max(
-          0,
-          Math.ceil((new Date(questionEndsAt).getTime() - Date.now()) / 1000),
-        ),
+        getSecondsLeft(questionEndsAt, serverClockOffsetMs, timeLimit),
       );
     }, 250);
     return () => window.clearInterval(timer);
-  }, [data?.room.questionEndsAt, state?.room.questionEndsAt]);
+  }, [
+    data?.room.currentQuestion,
+    data?.room.questionEndsAt,
+    data?.room.quiz.questions,
+    state?.currentQuestion?.timeLimit,
+    state?.room.currentQuestion,
+    state?.room.questionEndsAt,
+    serverClockOffsetMs,
+  ]);
 
   const roomState = state?.room.status ?? data?.room.status ?? "WAITING";
   const questionEndsAt =
@@ -305,13 +359,15 @@ export default function RoomPage({
       questionEndsAt &&
       !hasAutoEndedRef.current
     ) {
-      const hasExpired = Date.now() >= new Date(questionEndsAt).getTime();
+      const hasExpired =
+        getCorrectedNow(serverClockOffsetMs) >=
+        new Date(questionEndsAt).getTime();
       if (hasExpired && !isEmitting) {
         hasAutoEndedRef.current = true;
         emit("question:end");
       }
     }
-  }, [secondsLeft, roomState, questionEndsAt, isEmitting]);
+  }, [secondsLeft, roomState, questionEndsAt, isEmitting, serverClockOffsetMs]);
 
   async function finish() {
     if (
@@ -416,7 +472,7 @@ export default function RoomPage({
   );
 
   const timerExpired = questionEndsAt
-    ? Date.now() >= new Date(questionEndsAt).getTime()
+    ? getCorrectedNow(serverClockOffsetMs) >= new Date(questionEndsAt).getTime()
     : false;
 
   const showCorrectAnswer = Boolean(

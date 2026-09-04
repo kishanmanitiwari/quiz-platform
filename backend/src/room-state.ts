@@ -71,6 +71,7 @@ export async function getPublicRoomState(prisma: PrismaClient, roomId: string, p
       : null;
 
   return {
+    serverTime: new Date().toISOString(),
     room: {
       id: room.id,
       roomCode: room.roomCode,
