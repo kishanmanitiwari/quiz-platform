@@ -436,6 +436,7 @@ export default function JoinPage({
             </label>
             <input
               type="tel"
+              autoComplete="off"
               inputMode="numeric"
               className={`focus-ring mt-2 w-full rounded-xl border bg-white px-4 py-3.5 outline-none transition ${
                 phoneTouched && phone.length > 0 && phone.length < 10
