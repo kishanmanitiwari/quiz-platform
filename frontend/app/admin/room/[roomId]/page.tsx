@@ -643,7 +643,7 @@ export default function RoomPage({
                     </div>
                     <div>
                       <h1 className="text-xl font-black tracking-tight text-slate-900">
-                        ISKCON STALL
+                        ISKCON QUIZ STALL
                       </h1>
                       <p className="text-xs font-semibold tracking-widest text-amber-600">
                         PLAY • LEARN • GROW
